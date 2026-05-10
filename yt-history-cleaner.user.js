@@ -464,24 +464,48 @@
     item.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     setTimeout(() => {
-      // Find the three-dot menu button — try light DOM then shadow DOM
-      const menuSelectors = 'button#button[aria-label], yt-icon-button#menu button, button.yt-icon-button, button[aria-label*="Action" i]';
-      let menuBtn = item.querySelector(menuSelectors);
-      if (!menuBtn && item.shadowRoot) {
-        menuBtn = item.shadowRoot.querySelector(menuSelectors);
+      // Hover to reveal per-item controls (YouTube shows them on hover)
+      item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      item.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+      setTimeout(() => {
+      // Polymer's querySelector returns the section's button, not the item's.
+      // Use spatial matching: find a "More actions" button visually inside
+      // this item's bounding rect.
+      const itemRect = item.getBoundingClientRect();
+      const allButtons = document.querySelectorAll('button[aria-label]');
+      let menuBtn = null;
+      for (const btn of allButtons) {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (!label.includes('action') && !label.includes('more')) continue;
+        const r = btn.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        if (cx >= itemRect.left && cx <= itemRect.right &&
+            cy >= itemRect.top && cy <= itemRect.bottom) {
+          menuBtn = btn;
+          break;
+        }
       }
 
       // Diagnostic logging on first attempt
       if (index === 0) {
-        const lightBtns = item.querySelectorAll('button');
-        const shadowBtns = item.shadowRoot ? item.shadowRoot.querySelectorAll('button') : [];
-        console.log('[YTC] Delete: item tag:', item.tagName,
-                    '| light buttons:', lightBtns.length,
-                    '| shadow buttons:', shadowBtns.length,
-                    '| menuBtn found:', !!menuBtn);
-        const labels = [...lightBtns, ...shadowBtns].map(b =>
-          b.getAttribute('aria-label') || b.textContent.trim().slice(0, 40) || '(empty)');
-        if (labels.length) console.log('[YTC] Button labels:', JSON.stringify(labels));
+        console.log('[YTC] Delete: itemRect:', JSON.stringify({
+          top: Math.round(itemRect.top), bottom: Math.round(itemRect.bottom),
+          left: Math.round(itemRect.left), right: Math.round(itemRect.right)
+        }));
+        console.log('[YTC] Delete: menuBtn found spatially:', !!menuBtn,
+                    menuBtn ? menuBtn.getAttribute('aria-label') : '');
+        // Log all candidate buttons and their positions
+        const candidates = [...allButtons].filter(b => {
+          const l = (b.getAttribute('aria-label') || '').toLowerCase();
+          return l.includes('action') || l.includes('more');
+        }).map(b => {
+          const r = b.getBoundingClientRect();
+          return { label: b.getAttribute('aria-label'), top: Math.round(r.top), left: Math.round(r.left) };
+        });
+        console.log('[YTC] All "More/Action" buttons:', JSON.stringify(candidates));
       }
 
       if (!menuBtn) {
@@ -533,6 +557,7 @@
         100,
         DIALOG_TIMEOUT
       );
+      }, 300); // wait for hover to reveal per-item controls
     }, DELETE_STEP_MS);
   }
 
