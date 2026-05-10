@@ -276,6 +276,12 @@
   const SCROLL_PAUSE_MS = 1200;  // wait after each scroll for new items to render
   const SCROLL_MAX_SAME = 3;     // stop if scroll height hasn't changed this many times
 
+  // ========== Delete Phase Constants ==========
+
+  const DELETE_STEP_MS = 500;   // delay between item deletion attempts
+  const DIALOG_WAIT_MS = 800;   // wait for confirmation dialog to appear
+  const DIALOG_TIMEOUT = 3000;  // give up on dialog after this long
+
   // ========== Time Range Cutoff Logic ==========
 
   const RELATIVE_RE = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
@@ -383,8 +389,71 @@
 
   function handleDelete() {
     if (currentState !== STATE.READY) return;
-    console.log('[YT History Cleaner] Delete triggered');
+    deletedCount = 0;
+    setState(STATE.DELETING, { deleted: 0, total: foundItems.length });
+    deleteNext(0);
   }
+
+  function deleteNext(index) {
+    if (index >= foundItems.length) {
+      setState(STATE.DONE, { count: deletedCount });
+      return;
+    }
+
+    const item = foundItems[index];
+    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    setTimeout(() => {
+      const menuBtn = item.querySelector(
+        'button#button[aria-label], yt-icon-button#menu button, button.yt-icon-button'
+      );
+
+      if (!menuBtn) {
+        // Item may already be gone — skip
+        deleteNext(index + 1);
+        return;
+      }
+
+      menuBtn.click();
+
+      waitForElement(
+        'ytd-menu-service-item-renderer',
+        () => {
+          const menuItems = document.querySelectorAll('ytd-menu-service-item-renderer');
+          let removeBtn = null;
+          menuItems.forEach((mi) => {
+            if (mi.textContent.trim().toLowerCase().includes('remove from watch history')) {
+              removeBtn = mi;
+            }
+          });
+
+          if (!removeBtn) {
+            // Close menu and skip
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
+            return;
+          }
+
+          removeBtn.click();
+
+          setTimeout(() => {
+            // Handle any confirmation button in a toast or dialog
+            const confirmBtn = document.querySelector(
+              'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
+            );
+            if (confirmBtn) confirmBtn.click();
+
+            deletedCount++;
+            setState(STATE.DELETING, { deleted: deletedCount, total: foundItems.length });
+            setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
+          }, DIALOG_WAIT_MS);
+        },
+        100,
+        DIALOG_TIMEOUT
+      );
+    }, DELETE_STEP_MS);
+  }
+
   function handleReset()  { initStateIdle(); }
 
   function injectPanel() {
