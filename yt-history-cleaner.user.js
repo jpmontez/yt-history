@@ -387,13 +387,36 @@
     // --- Collect items from matching sections via #contents children ---
     // Instead of querying for a specific renderer tag (which Polymer may
     // patch/block), grab direct children of the #contents container.
+    // For Shorts shelves (ytd-reel-shelf-renderer), drill in to get
+    // individual reel items rather than the shelf container itself.
     for (const sd of sections) {
       if (!isSectionOlderThanCutoff(sd.text, cutoff)) continue;
       const contents = sd.el.querySelector('#contents') ||
                        (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
       if (!contents) continue;
       for (const child of contents.children) {
-        if (!foundItems.includes(child)) foundItems.push(child);
+        if (child.tagName === 'YTD-REEL-SHELF-RENDERER') {
+          // Shorts shelf — collect individual reel items inside it
+          const reelItems = [...child.querySelectorAll('ytd-reel-item-renderer')];
+          if (reelItems.length > 0) {
+            for (const ri of reelItems) {
+              if (!foundItems.includes(ri)) foundItems.push(ri);
+            }
+          } else {
+            // Fallback: try #items container children
+            const shelfItems = child.querySelector('#items');
+            if (shelfItems) {
+              for (const ri of shelfItems.children) {
+                if (!foundItems.includes(ri)) foundItems.push(ri);
+              }
+            } else {
+              // Last resort: add the shelf itself
+              if (!foundItems.includes(child)) foundItems.push(child);
+            }
+          }
+        } else {
+          if (!foundItems.includes(child)) foundItems.push(child);
+        }
       }
     }
 
@@ -407,13 +430,20 @@
         if (contents) {
           const tags = [...contents.children].map(c => c.tagName);
           console.log('[YTC] First section #contents children (' + tags.length + '):', tags.slice(0, 5).join(', '));
+          const reelShelf = contents.querySelector('ytd-reel-shelf-renderer');
+          if (reelShelf) {
+            const reelItems = reelShelf.querySelectorAll('ytd-reel-item-renderer');
+            const shelfItems = reelShelf.querySelector('#items');
+            console.log('[YTC] Reel shelf: ytd-reel-item-renderer count:', reelItems.length,
+                        '| #items children:', shelfItems ? shelfItems.children.length : 'n/a');
+            if (shelfItems && shelfItems.children.length > 0) {
+              const itemTags = [...shelfItems.children].map(c => c.tagName).slice(0, 5);
+              console.log('[YTC] Reel #items tags:', itemTags.join(', '));
+            }
+          }
         } else {
           const ids = [...sd.el.children].map(c => c.tagName + '#' + (c.id || '?'));
           console.log('[YTC] #contents not found. Section children:', ids.join(', '));
-          if (sd.el.shadowRoot) {
-            const sIds = [...sd.el.shadowRoot.children].map(c => c.tagName + '#' + (c.id || '?'));
-            console.log('[YTC] Section shadow root children:', sIds.join(', '));
-          }
         }
       }
     }
