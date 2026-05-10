@@ -364,7 +364,7 @@
     if (cutoff === null) return true;
     const date = parseSectionDate(headerText);
     if (!date) return false;
-    return date < cutoff;
+    return date <= cutoff;
   }
 
   function handleScan() {
