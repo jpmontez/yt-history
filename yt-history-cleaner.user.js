@@ -377,35 +377,45 @@
   }
 
   function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
-    // Build a set of section rects that are older than the cutoff
-    const matchingSections = [];
-    document.querySelectorAll('ytd-item-section-renderer').forEach((section) => {
-      const header = section.querySelector('ytd-item-section-header-renderer');
-      if (!header) return;
-      const headerText = header.textContent.trim();
-      if (!isSectionOlderThanCutoff(headerText, cutoff)) return;
-      matchingSections.push(section);
+    // --- Collect all section headers with dates ---
+    const sections = [];
+    document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
+      const h = sec.querySelector('ytd-item-section-header-renderer');
+      if (h) sections.push({ el: sec, text: h.textContent.trim() });
     });
 
-    if (matchingSections.length > 0) {
-      // Walk up from each video (crossing shadow boundaries) to find its section
-      document.querySelectorAll('ytd-video-renderer').forEach((item) => {
-        if (foundItems.includes(item)) return;
-        let node = item;
-        while (node) {
-          if (matchingSections.includes(node)) {
-            foundItems.push(item);
-            break;
-          }
-          if (node.parentElement) {
-            node = node.parentElement;
-          } else if (node.parentNode instanceof ShadowRoot) {
-            node = node.parentNode.host;
-          } else {
-            break;
+    // --- Collect items from matching sections via #contents children ---
+    // Instead of querying for a specific renderer tag (which Polymer may
+    // patch/block), grab direct children of the #contents container.
+    for (const sd of sections) {
+      if (!isSectionOlderThanCutoff(sd.text, cutoff)) continue;
+      const contents = sd.el.querySelector('#contents') ||
+                       (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
+      if (!contents) continue;
+      for (const child of contents.children) {
+        if (!foundItems.includes(child)) foundItems.push(child);
+      }
+    }
+
+    // --- Diagnostic logging (first iteration only) ---
+    if (lastHeight === 0 && sameSizeCount === 0) {
+      console.log('[YTC] sections:', sections.length, '| collected:', foundItems.length);
+      if (sections.length > 0) {
+        const sd = sections[0];
+        const contents = sd.el.querySelector('#contents') ||
+                         (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
+        if (contents) {
+          const tags = [...contents.children].map(c => c.tagName);
+          console.log('[YTC] First section #contents children (' + tags.length + '):', tags.slice(0, 5).join(', '));
+        } else {
+          const ids = [...sd.el.children].map(c => c.tagName + '#' + (c.id || '?'));
+          console.log('[YTC] #contents not found. Section children:', ids.join(', '));
+          if (sd.el.shadowRoot) {
+            const sIds = [...sd.el.shadowRoot.children].map(c => c.tagName + '#' + (c.id || '?'));
+            console.log('[YTC] Section shadow root children:', sIds.join(', '));
           }
         }
-      });
+      }
     }
 
     setState(STATE.SCANNING, { count: foundItems.length });
