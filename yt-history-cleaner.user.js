@@ -3,7 +3,8 @@
 // @namespace    https://github.com/jmontez
 // @version      1.0
 // @description  Bulk-delete YouTube watch history by time range
-// @match        https://www.youtube.com/feed/history
+// @match        *://www.youtube.com/feed/history*
+// @match        *://youtube.com/feed/history*
 // @grant        none
 // ==/UserScript==
 
@@ -132,6 +133,7 @@
   let deletedCount = 0;
 
   const TIME_RANGES = [
+    { label: '1 day',    days: 1   },
     { label: '1 week',   days: 7   },
     { label: '2 weeks',  days: 14  },
     { label: '1 month',  days: 30  },
@@ -294,18 +296,6 @@
 
   // ========== Time Range Cutoff Logic ==========
 
-  const RELATIVE_RE = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
-
-  const UNIT_MS = {
-    second: 1000,
-    minute: 60 * 1000,
-    hour:   60 * 60 * 1000,
-    day:    24 * 60 * 60 * 1000,
-    week:   7  * 24 * 60 * 60 * 1000,
-    month:  30 * 24 * 60 * 60 * 1000,
-    year:   365 * 24 * 60 * 60 * 1000,
-  };
-
   /**
    * Returns a Date representing the oldest allowed timestamp,
    * or null for "All time" (no cutoff).
@@ -322,31 +312,57 @@
   }
 
   /**
-   * Returns an approximate Date for when the item was watched,
-   * or null if the timestamp can't be parsed.
+   * Parses a section header string like "Today", "Yesterday", "Friday",
+   * "May 3", "March 12", into an approximate Date (midnight that day).
+   * Returns null if unrecognised.
    */
-  function parseItemDate(itemEl) {
-    const spans = itemEl.querySelectorAll('#metadata-line span, .ytd-video-meta-block span');
-    for (const span of spans) {
-      const match = span.textContent.trim().match(RELATIVE_RE);
-      if (!match) continue;
-      const amount = parseInt(match[1], 10);
-      const unit   = match[2].toLowerCase();
-      const date   = new Date();
-      date.setTime(date.getTime() - amount * UNIT_MS[unit]);
-      return date;
+  function parseSectionDate(headerText) {
+    const text = headerText.trim();
+    const now  = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (/^today$/i.test(text)) return today;
+
+    if (/^yesterday$/i.test(text)) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - 1);
+      return d;
     }
+
+    // Day of week: "Monday", "Tuesday", etc. — within the last 7 days
+    const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const dayIdx = days.indexOf(text.toLowerCase());
+    if (dayIdx !== -1) {
+      const d = new Date(today);
+      const diff = (today.getDay() - dayIdx + 7) % 7 || 7;
+      d.setDate(d.getDate() - diff);
+      return d;
+    }
+
+    // "May 3" or "March 12" — assume current year, fall back to last year if in future
+    const monthDay = text.match(/^([A-Za-z]+)\s+(\d+)$/);
+    if (monthDay) {
+      const months = ['january','february','march','april','may','june',
+                      'july','august','september','october','november','december'];
+      const mIdx = months.indexOf(monthDay[1].toLowerCase());
+      if (mIdx !== -1) {
+        const d = new Date(today.getFullYear(), mIdx, parseInt(monthDay[2], 10));
+        if (d > today) d.setFullYear(d.getFullYear() - 1);
+        return d;
+      }
+    }
+
     return null;
   }
 
   /**
-   * Returns true if the item should be deleted.
+   * Returns true if a section (identified by its header date) is older than cutoff.
    * cutoff === null means "All time" — always returns true.
-   * If the date can't be parsed, returns false (skip safely).
+   * If the header can't be parsed, returns false (skip safely).
    */
-  function isItemOlderThanCutoff(itemEl, cutoff) {
+  function isSectionOlderThanCutoff(headerText, cutoff) {
     if (cutoff === null) return true;
-    const date = parseItemDate(itemEl);
+    const date = parseSectionDate(headerText);
     if (!date) return false;
     return date < cutoff;
   }
@@ -361,11 +377,15 @@
   }
 
   function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
-    // Collect all currently visible matching items
-    document.querySelectorAll('ytd-video-renderer').forEach((item) => {
-      if (!foundItems.includes(item) && isItemOlderThanCutoff(item, cutoff)) {
-        foundItems.push(item);
-      }
+    // Collect all items in sections whose header date is older than the cutoff
+    document.querySelectorAll('ytd-item-section-renderer').forEach((section) => {
+      const header = section.querySelector('ytd-item-section-header-renderer');
+      if (!header) return;
+      const headerText = header.textContent.trim();
+      if (!isSectionOlderThanCutoff(headerText, cutoff)) return;
+      section.querySelectorAll('ytd-video-renderer').forEach((item) => {
+        if (!foundItems.includes(item)) foundItems.push(item);
+      });
     });
 
     setState(STATE.SCANNING, { count: foundItems.length });
@@ -477,6 +497,7 @@
   }
 
   function appendPanel(parent, beforeNode) {
+    if (document.getElementById('ytc-panel')) return;
     injectStyles();
     const panel = buildPanel();
     if (beforeNode) {
