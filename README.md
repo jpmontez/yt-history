@@ -25,16 +25,16 @@ The panel appears in the sidebar on desktop, or above the video feed on mobile.
 1. **Choose a time range** from the dropdown (e.g. "1 month" = delete everything older than 30 days).
 2. Click **Scan** — the script auto-scrolls the page to load all matching history entries into memory and shows a live count.
 
-   <img src="docs/screenshots/idle.png" width="320" alt="Idle state — time range picker and Scan button">
+   <img src="docs/screenshots/idle.png" width="600" alt="Idle state — time range picker and Scan button">
 
 3. Once scanning is complete, click **Delete N items** to begin deletion.
 
-   <img src="docs/screenshots/ready-to-delete.png" width="320" alt="Ready state — item count and Delete button">
+   <img src="docs/screenshots/ready-to-delete.png" width="600" alt="Ready state — item count and Delete button">
 
 4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A live counter shows progress.
 5. When finished, a green confirmation shows how many items were deleted. **Refresh the page** to see the changes reflected.
 
-   <img src="docs/screenshots/done.png" width="320" alt="Done state — green success confirmation">
+   <img src="docs/screenshots/done.png" width="600" alt="Done state — green success confirmation">
 
 ---
 
