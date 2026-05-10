@@ -362,7 +362,7 @@
       return;
     }
 
-    window.scrollTo(0, document.documentElement.scrollHeight);
+    window.scrollTo(0, currentHeight);
     setTimeout(() => scrollAndCollect(cutoff, newSameCount, currentHeight), SCROLL_PAUSE_MS);
   }
 
