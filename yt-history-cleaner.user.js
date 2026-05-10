@@ -387,21 +387,21 @@
       matchingSections.push(section);
     });
 
-    if (matchingSections.length === 0) {
-      // no matching sections yet — just scroll
-    } else {
-      // Use document-level query (Polymer-patched, pierces shadow roots)
-      // then filter by whether the item sits inside a matching section rect
+    if (matchingSections.length > 0) {
+      // Walk up from each video (crossing shadow boundaries) to find its section
       document.querySelectorAll('ytd-video-renderer').forEach((item) => {
         if (foundItems.includes(item)) return;
-        const r = item.getBoundingClientRect();
-        const itemMid = r.top + r.height / 2 + window.scrollY;
-        for (const section of matchingSections) {
-          const sr = section.getBoundingClientRect();
-          const sTop = sr.top + window.scrollY;
-          const sBot = sr.bottom + window.scrollY;
-          if (itemMid >= sTop && itemMid <= sBot) {
+        let node = item;
+        while (node) {
+          if (matchingSections.includes(node)) {
             foundItems.push(item);
+            break;
+          }
+          if (node.parentElement) {
+            node = node.parentElement;
+          } else if (node.parentNode instanceof ShadowRoot) {
+            node = node.parentNode.host;
+          } else {
             break;
           }
         }
