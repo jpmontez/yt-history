@@ -26,7 +26,17 @@
   }
 
   function init() {
-    injectPanel();
+    if (window.location.pathname === '/feed/history') {
+      injectPanel();
+    }
+
+    window.addEventListener('yt-navigate-finish', () => {
+      const existing = document.getElementById('ytc-panel');
+      if (existing) existing.remove();
+      if (window.location.pathname === '/feed/history') {
+        injectPanel();
+      }
+    });
   }
 
   const STYLES = `
@@ -452,18 +462,16 @@
   function handleReset()  { initStateIdle(); }
 
   function injectPanel() {
-    // Desktop: right sidebar container
-    // Mobile: below the "Manage all history" section
-    // Both cases: append AFTER existing items
     const isMobile = window.innerWidth < 1014;
 
     if (isMobile) {
-      waitForElement('ytd-secondary-search-container-renderer, #secondary', (el) => {
+      // Try the chip bar first (Comments/Posts/Live chat section), fall back to #secondary
+      waitForElement('ytd-browse-filter-chip-bar-renderer, #secondary', (el) => {
         appendPanel(el.parentElement || el, el.nextSibling);
       });
     } else {
       waitForElement('#secondary', (sidebar) => {
-        appendPanel(sidebar, null); // append to end
+        appendPanel(sidebar, null);
       });
     }
   }
