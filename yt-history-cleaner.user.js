@@ -464,9 +464,25 @@
     item.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     setTimeout(() => {
-      const menuBtn = item.querySelector(
-        'button#button[aria-label], yt-icon-button#menu button, button.yt-icon-button'
-      );
+      // Find the three-dot menu button — try light DOM then shadow DOM
+      const menuSelectors = 'button#button[aria-label], yt-icon-button#menu button, button.yt-icon-button, button[aria-label*="Action" i]';
+      let menuBtn = item.querySelector(menuSelectors);
+      if (!menuBtn && item.shadowRoot) {
+        menuBtn = item.shadowRoot.querySelector(menuSelectors);
+      }
+
+      // Diagnostic logging on first attempt
+      if (index === 0) {
+        const lightBtns = item.querySelectorAll('button');
+        const shadowBtns = item.shadowRoot ? item.shadowRoot.querySelectorAll('button') : [];
+        console.log('[YTC] Delete: item tag:', item.tagName,
+                    '| light buttons:', lightBtns.length,
+                    '| shadow buttons:', shadowBtns.length,
+                    '| menuBtn found:', !!menuBtn);
+        const labels = [...lightBtns, ...shadowBtns].map(b =>
+          b.getAttribute('aria-label') || b.textContent.trim().slice(0, 40) || '(empty)');
+        if (labels.length) console.log('[YTC] Button labels:', JSON.stringify(labels));
+      }
 
       if (!menuBtn) {
         // Item may already be gone — skip
@@ -476,11 +492,19 @@
 
       menuBtn.click();
 
+      // Wait for menu popup — try multiple menu item selectors
+      const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
       waitForElement(
-        'ytd-menu-service-item-renderer',
+        menuItemSel,
         () => {
-          const removeBtn = [...document.querySelectorAll('ytd-menu-service-item-renderer')]
+          const removeBtn = [...document.querySelectorAll(menuItemSel)]
             .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+
+          if (index === 0) {
+            const allItems = document.querySelectorAll(menuItemSel);
+            console.log('[YTC] Menu items:', allItems.length,
+                        '| removeBtn:', removeBtn ? removeBtn.tagName : 'null');
+          }
 
           if (!removeBtn) {
             // Close menu and skip
