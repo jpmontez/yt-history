@@ -271,6 +271,65 @@
     setState(STATE.IDLE);
   }
 
+  // ========== Time Range Cutoff Logic ==========
+
+  const RELATIVE_RE = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
+
+  const UNIT_MS = {
+    second: 1000,
+    minute: 60 * 1000,
+    hour:   60 * 60 * 1000,
+    day:    24 * 60 * 60 * 1000,
+    week:   7  * 24 * 60 * 60 * 1000,
+    month:  30 * 24 * 60 * 60 * 1000,
+    year:   365 * 24 * 60 * 60 * 1000,
+  };
+
+  /**
+   * Returns a Date representing the oldest allowed timestamp,
+   * or null for "All time" (no cutoff).
+   */
+  function getCutoffDate() {
+    const rangeEl = document.getElementById('ytc-range');
+    const idx = parseInt(rangeEl.value, 10);
+    const { days } = TIME_RANGES[idx];
+    if (days === null) return null;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setHours(0, 0, 0, 0);
+    return cutoff;
+  }
+
+  /**
+   * Returns an approximate Date for when the item was watched,
+   * or null if the timestamp can't be parsed.
+   */
+  function parseItemDate(itemEl) {
+    const spans = itemEl.querySelectorAll('#metadata-line span, .ytd-video-meta-block span');
+    for (const span of spans) {
+      const match = span.textContent.trim().match(RELATIVE_RE);
+      if (!match) continue;
+      const amount = parseInt(match[1], 10);
+      const unit   = match[2].toLowerCase();
+      const date   = new Date();
+      date.setTime(date.getTime() - amount * UNIT_MS[unit]);
+      return date;
+    }
+    return null;
+  }
+
+  /**
+   * Returns true if the item should be deleted.
+   * cutoff === null means "All time" — always returns true.
+   * If the date can't be parsed, returns false (skip safely).
+   */
+  function isItemOlderThanCutoff(itemEl, cutoff) {
+    if (cutoff === null) return true;
+    const date = parseItemDate(itemEl);
+    if (!date) return false;
+    return date < cutoff;
+  }
+
   function handleScan() {
     if (currentState !== STATE.IDLE) return;
     console.log('[YT History Cleaner] Scan triggered');
