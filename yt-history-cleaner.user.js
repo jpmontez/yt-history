@@ -419,13 +419,8 @@
       waitForElement(
         'ytd-menu-service-item-renderer',
         () => {
-          const menuItems = document.querySelectorAll('ytd-menu-service-item-renderer');
-          let removeBtn = null;
-          menuItems.forEach((mi) => {
-            if (mi.textContent.trim().toLowerCase().includes('remove from watch history')) {
-              removeBtn = mi;
-            }
-          });
+          const removeBtn = [...document.querySelectorAll('ytd-menu-service-item-renderer')]
+            .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
 
           if (!removeBtn) {
             // Close menu and skip
