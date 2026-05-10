@@ -177,7 +177,8 @@
   }
 
   function renderState(state, data = {}) {
-    const panel     = document.getElementById('ytc-panel');
+    const panel = document.getElementById('ytc-panel');
+    if (!panel) { console.warn('[YT History Cleaner] renderState called before panel exists'); return; }
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
 
@@ -270,8 +271,14 @@
     setState(STATE.IDLE);
   }
 
-  function handleScan()   { console.log('[YT History Cleaner] Scan triggered'); }
-  function handleDelete() { console.log('[YT History Cleaner] Delete triggered'); }
+  function handleScan() {
+    if (currentState !== STATE.IDLE) return;
+    console.log('[YT History Cleaner] Scan triggered');
+  }
+  function handleDelete() {
+    if (currentState !== STATE.READY) return;
+    console.log('[YT History Cleaner] Delete triggered');
+  }
   function handleReset()  { initStateIdle(); }
 
   function injectPanel() {
