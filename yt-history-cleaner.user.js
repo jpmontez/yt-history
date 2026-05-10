@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.0
+// @version      1.1
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/feed/history*
 // @match        *://youtube.com/feed/history*
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  // YouTube is a SPA — wait for the sidebar to exist before injecting
+  // YouTube is a SPA — wait for an element before injecting
   function waitForElement(selector, callback, interval = 300, maxWait = 15000) {
     const start = Date.now();
     const timer = setInterval(() => {
@@ -21,7 +21,6 @@
         callback(el);
       } else if (Date.now() - start > maxWait) {
         clearInterval(timer);
-        console.warn('[YT History Cleaner] Timed out waiting for', selector);
       }
     }, interval);
   }
@@ -190,18 +189,17 @@
 
   function renderState(state, data = {}) {
     const panel = document.getElementById('ytc-panel');
-    if (!panel) { console.warn('[YT History Cleaner] renderState called before panel exists'); return; }
+    if (!panel) return;
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
 
-    // Remove any existing info/hint blocks from previous state
     panel.querySelectorAll('.ytc-info, .ytc-hint').forEach(el => el.remove());
 
     switch (state) {
 
       case STATE.IDLE:
-        rangeEl.disabled   = false;
-        rangeEl.onchange   = null;
+        rangeEl.disabled      = false;
+        rangeEl.onchange      = null;
         actionBtn.textContent = 'Scan';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = false;
@@ -217,8 +215,8 @@
         break;
 
       case STATE.READY:
-        rangeEl.disabled   = false;
-        rangeEl.onchange   = () => setState(STATE.IDLE);
+        rangeEl.disabled      = false;
+        rangeEl.onchange      = () => setState(STATE.IDLE);
         actionBtn.textContent = `Delete ${data.count} items`;
         actionBtn.className   = 'ytc-btn ytc-btn-red';
         actionBtn.disabled    = false;
@@ -246,10 +244,6 @@
     }
   }
 
-  /**
-   * Inserts an info box before `beforeNode`.
-   * Uses safe DOM methods — no innerHTML.
-   */
   function insertInfo(beforeNode, color, labelText, strongText) {
     const panel = document.getElementById('ytc-panel');
     const div   = document.createElement('div');
@@ -283,23 +277,12 @@
     setState(STATE.IDLE);
   }
 
-  // ========== Scan Phase Constants ==========
+  const SCROLL_PAUSE_MS = 1200;
+  const SCROLL_MAX_SAME = 3;
+  const DELETE_STEP_MS  = 500;
+  const DIALOG_WAIT_MS  = 800;
+  const DIALOG_TIMEOUT  = 3000;
 
-  const SCROLL_PAUSE_MS = 1200;  // wait after each scroll for new items to render
-  const SCROLL_MAX_SAME = 3;     // stop if scroll height hasn't changed this many times
-
-  // ========== Delete Phase Constants ==========
-
-  const DELETE_STEP_MS = 500;   // delay between item deletion attempts
-  const DIALOG_WAIT_MS = 800;   // wait for confirmation dialog to appear
-  const DIALOG_TIMEOUT = 3000;  // give up on dialog after this long
-
-  // ========== Time Range Cutoff Logic ==========
-
-  /**
-   * Returns a Date representing the oldest allowed timestamp,
-   * or null for "All time" (no cutoff).
-   */
   function getCutoffDate() {
     const rangeEl = document.getElementById('ytc-range');
     const idx = parseInt(rangeEl.value, 10);
@@ -311,14 +294,9 @@
     return cutoff;
   }
 
-  /**
-   * Parses a section header string like "Today", "Yesterday", "Friday",
-   * "May 3", "March 12", into an approximate Date (midnight that day).
-   * Returns null if unrecognised.
-   */
   function parseSectionDate(headerText) {
-    const text = headerText.trim();
-    const now  = new Date();
+    const text  = headerText.trim();
+    const now   = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     if (/^today$/i.test(text)) return today;
@@ -329,7 +307,6 @@
       return d;
     }
 
-    // Day of week: "Monday", "Tuesday", etc. — within the last 7 days
     const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const dayIdx = days.indexOf(text.toLowerCase());
     if (dayIdx !== -1) {
@@ -339,7 +316,6 @@
       return d;
     }
 
-    // "May 3" or "March 12" — assume current year, fall back to last year if in future
     const monthDay = text.match(/^([A-Za-z]+)\s+(\d+)$/);
     if (monthDay) {
       const months = ['january','february','march','april','may','june',
@@ -355,11 +331,6 @@
     return null;
   }
 
-  /**
-   * Returns true if a section (identified by its header date) is older than cutoff.
-   * cutoff === null means "All time" — always returns true.
-   * If the header can't be parsed, returns false (skip safely).
-   */
   function isSectionOlderThanCutoff(headerText, cutoff) {
     if (cutoff === null) return true;
     const date = parseSectionDate(headerText);
@@ -377,18 +348,12 @@
   }
 
   function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
-    // --- Collect all section headers with dates ---
     const sections = [];
     document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
       const h = sec.querySelector('ytd-item-section-header-renderer');
       if (h) sections.push({ el: sec, text: h.textContent.trim() });
     });
 
-    // --- Collect items from matching sections via #contents children ---
-    // Instead of querying for a specific renderer tag (which Polymer may
-    // patch/block), grab direct children of the #contents container.
-    // For Shorts shelves (ytd-reel-shelf-renderer), drill in to get
-    // individual reel items rather than the shelf container itself.
     for (const sd of sections) {
       if (!isSectionOlderThanCutoff(sd.text, cutoff)) continue;
       const contents = sd.el.querySelector('#contents') ||
@@ -403,47 +368,17 @@
               if (!foundItems.includes(ri)) foundItems.push(ri);
             }
           } else {
-            // Fallback: try #items container children
             const shelfItems = child.querySelector('#items');
             if (shelfItems) {
               for (const ri of shelfItems.children) {
                 if (!foundItems.includes(ri)) foundItems.push(ri);
               }
             } else {
-              // Last resort: add the shelf itself
               if (!foundItems.includes(child)) foundItems.push(child);
             }
           }
         } else {
           if (!foundItems.includes(child)) foundItems.push(child);
-        }
-      }
-    }
-
-    // --- Diagnostic logging (first iteration only) ---
-    if (lastHeight === 0 && sameSizeCount === 0) {
-      console.log('[YTC] sections:', sections.length, '| collected:', foundItems.length);
-      if (sections.length > 0) {
-        const sd = sections[0];
-        const contents = sd.el.querySelector('#contents') ||
-                         (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
-        if (contents) {
-          const tags = [...contents.children].map(c => c.tagName);
-          console.log('[YTC] First section #contents children (' + tags.length + '):', tags.slice(0, 5).join(', '));
-          const reelShelf = contents.querySelector('ytd-reel-shelf-renderer');
-          if (reelShelf) {
-            const reelItems = reelShelf.querySelectorAll('ytd-reel-item-renderer');
-            const shelfItems = reelShelf.querySelector('#items');
-            console.log('[YTC] Reel shelf: ytd-reel-item-renderer count:', reelItems.length,
-                        '| #items children:', shelfItems ? shelfItems.children.length : 'n/a');
-            if (shelfItems && shelfItems.children.length > 0) {
-              const itemTags = [...shelfItems.children].map(c => c.tagName).slice(0, 5);
-              console.log('[YTC] Reel #items tags:', itemTags.join(', '));
-            }
-          }
-        } else {
-          const ids = [...sd.el.children].map(c => c.tagName + '#' + (c.id || '?'));
-          console.log('[YTC] #contents not found. Section children:', ids.join(', '));
         }
       }
     }
@@ -494,110 +429,80 @@
     item.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     setTimeout(() => {
-      // Hover to reveal per-item controls (YouTube shows them on hover)
+      // Hover to reveal per-item controls
       item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
       item.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
       setTimeout(() => {
-      // Polymer's querySelector returns the section's button, not the item's.
-      // Use spatial matching: find a "More actions" button visually inside
-      // this item's bounding rect.
-      const itemRect = item.getBoundingClientRect();
-      const allButtons = document.querySelectorAll('button[aria-label]');
-      let menuBtn = null;
-      for (const btn of allButtons) {
-        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (!label.includes('action') && !label.includes('more')) continue;
-        const r = btn.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) continue;
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        if (cx >= itemRect.left && cx <= itemRect.right &&
-            cy >= itemRect.top && cy <= itemRect.bottom) {
-          menuBtn = btn;
-          break;
+        // Polymer's querySelector returns the section's button, not the item's.
+        // Use spatial matching: find a "More actions" button whose center falls
+        // within this item's bounding rect.
+        const itemRect = item.getBoundingClientRect();
+        const allButtons = document.querySelectorAll('button[aria-label]');
+        let menuBtn = null;
+        for (const btn of allButtons) {
+          const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (!label.includes('action') && !label.includes('more')) continue;
+          const r = btn.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          if (cx >= itemRect.left && cx <= itemRect.right &&
+              cy >= itemRect.top  && cy <= itemRect.bottom) {
+            menuBtn = btn;
+            break;
+          }
         }
-      }
 
-      // Diagnostic logging on first attempt
-      if (index === 0) {
-        console.log('[YTC] Delete: itemRect:', JSON.stringify({
-          top: Math.round(itemRect.top), bottom: Math.round(itemRect.bottom),
-          left: Math.round(itemRect.left), right: Math.round(itemRect.right)
-        }));
-        console.log('[YTC] Delete: menuBtn found spatially:', !!menuBtn,
-                    menuBtn ? menuBtn.getAttribute('aria-label') : '');
-        // Log all candidate buttons and their positions
-        const candidates = [...allButtons].filter(b => {
-          const l = (b.getAttribute('aria-label') || '').toLowerCase();
-          return l.includes('action') || l.includes('more');
-        }).map(b => {
-          const r = b.getBoundingClientRect();
-          return { label: b.getAttribute('aria-label'), top: Math.round(r.top), left: Math.round(r.left) };
-        });
-        console.log('[YTC] All "More/Action" buttons:', JSON.stringify(candidates));
-      }
+        if (!menuBtn) {
+          deleteNext(index + 1);
+          return;
+        }
 
-      if (!menuBtn) {
-        // Item may already be gone — skip
-        deleteNext(index + 1);
-        return;
-      }
+        menuBtn.click();
 
-      menuBtn.click();
+        const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
+        waitForElement(
+          menuItemSel,
+          () => {
+            const removeBtn = [...document.querySelectorAll(menuItemSel)]
+              .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
 
-      // Wait for menu popup — try multiple menu item selectors
-      const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
-      waitForElement(
-        menuItemSel,
-        () => {
-          const removeBtn = [...document.querySelectorAll(menuItemSel)]
-            .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+            if (!removeBtn) {
+              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+              setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
+              return;
+            }
 
-          if (index === 0) {
-            const allItems = document.querySelectorAll(menuItemSel);
-            console.log('[YTC] Menu items:', allItems.length,
-                        '| removeBtn:', removeBtn ? removeBtn.tagName : 'null');
-          }
+            // yt-list-item-view-model doesn't handle click directly —
+            // find the actual clickable child element inside it
+            const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
+            clickTarget.click();
 
-          if (!removeBtn) {
-            // Close menu and skip
-            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-            setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
-            return;
-          }
+            setTimeout(() => {
+              const confirmBtn = document.querySelector(
+                'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
+              );
+              if (confirmBtn) confirmBtn.click();
 
-          // yt-list-item-view-model doesn't handle click directly —
-          // find the actual clickable child element inside it
-          const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
-          clickTarget.click();
-
-          setTimeout(() => {
-            // Handle any confirmation button in a toast or dialog
-            const confirmBtn = document.querySelector(
-              'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
-            );
-            if (confirmBtn) confirmBtn.click();
-
-            deletedCount++;
-            setState(STATE.DELETING, { deleted: deletedCount, total: foundItems.length });
-            setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
-          }, DIALOG_WAIT_MS);
-        },
-        100,
-        DIALOG_TIMEOUT
-      );
+              deletedCount++;
+              setState(STATE.DELETING, { deleted: deletedCount, total: foundItems.length });
+              setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
+            }, DIALOG_WAIT_MS);
+          },
+          100,
+          DIALOG_TIMEOUT
+        );
       }, 300); // wait for hover to reveal per-item controls
     }, DELETE_STEP_MS);
   }
 
-  function handleReset()  { initStateIdle(); }
+  function handleReset() { initStateIdle(); }
 
   function injectPanel() {
     const isMobile = window.innerWidth < 1014;
 
     if (isMobile) {
-      // Try the chip bar first (Comments/Posts/Live chat section), fall back to #secondary
       waitForElement('ytd-browse-filter-chip-bar-renderer, #secondary', (el) => {
         appendPanel(el.parentElement || el, el.nextSibling);
       });
@@ -618,7 +523,6 @@
       parent.appendChild(panel);
     }
     initStateIdle();
-    console.log('[YT History Cleaner] Panel injected');
   }
 
   init();
