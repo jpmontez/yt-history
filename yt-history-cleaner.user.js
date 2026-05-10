@@ -271,6 +271,11 @@
     setState(STATE.IDLE);
   }
 
+  // ========== Scan Phase Constants ==========
+
+  const SCROLL_PAUSE_MS = 1200;  // wait after each scroll for new items to render
+  const SCROLL_MAX_SAME = 3;     // stop if scroll height hasn't changed this many times
+
   // ========== Time Range Cutoff Logic ==========
 
   const RELATIVE_RE = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
@@ -332,8 +337,50 @@
 
   function handleScan() {
     if (currentState !== STATE.IDLE) return;
-    console.log('[YT History Cleaner] Scan triggered');
+    foundItems   = [];
+    deletedCount = 0;
+    const cutoff = getCutoffDate();
+    setState(STATE.SCANNING, { count: 0 });
+    scrollAndCollect(cutoff, 0, 0);
   }
+
+  function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
+    // Collect all currently visible matching items
+    document.querySelectorAll('ytd-video-renderer').forEach((item) => {
+      if (!foundItems.includes(item) && isItemOlderThanCutoff(item, cutoff)) {
+        foundItems.push(item);
+      }
+    });
+
+    setState(STATE.SCANNING, { count: foundItems.length });
+
+    const currentHeight = document.documentElement.scrollHeight;
+    const newSameCount  = currentHeight === lastHeight ? sameSizeCount + 1 : 0;
+
+    if (newSameCount >= SCROLL_MAX_SAME) {
+      onScanComplete();
+      return;
+    }
+
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    setTimeout(() => scrollAndCollect(cutoff, newSameCount, currentHeight), SCROLL_PAUSE_MS);
+  }
+
+  function onScanComplete() {
+    if (foundItems.length === 0) {
+      setState(STATE.IDLE);
+      const panel     = document.getElementById('ytc-panel');
+      const actionBtn = document.getElementById('ytc-action');
+      const msg = document.createElement('div');
+      msg.className   = 'ytc-info ytc-info-blue';
+      msg.textContent = 'No items found in this range.';
+      panel.insertBefore(msg, actionBtn);
+      setTimeout(() => msg.remove(), 3000);
+      return;
+    }
+    setState(STATE.READY, { count: foundItems.length });
+  }
+
   function handleDelete() {
     if (currentState !== STATE.READY) return;
     console.log('[YT History Cleaner] Delete triggered');
