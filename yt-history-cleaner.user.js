@@ -513,7 +513,10 @@
             return;
           }
 
-          removeBtn.click();
+          // yt-list-item-view-model doesn't handle click directly —
+          // find the actual clickable child element inside it
+          const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
+          clickTarget.click();
 
           setTimeout(() => {
             // Handle any confirmation button in a toast or dialog
