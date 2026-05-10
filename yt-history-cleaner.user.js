@@ -377,16 +377,36 @@
   }
 
   function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
-    // Collect all items in sections whose header date is older than the cutoff
+    // Build a set of section rects that are older than the cutoff
+    const matchingSections = [];
     document.querySelectorAll('ytd-item-section-renderer').forEach((section) => {
       const header = section.querySelector('ytd-item-section-header-renderer');
       if (!header) return;
       const headerText = header.textContent.trim();
       if (!isSectionOlderThanCutoff(headerText, cutoff)) return;
-      section.querySelectorAll('ytd-video-renderer').forEach((item) => {
-        if (!foundItems.includes(item)) foundItems.push(item);
-      });
+      matchingSections.push(section);
     });
+
+    if (matchingSections.length === 0) {
+      // no matching sections yet — just scroll
+    } else {
+      // Use document-level query (Polymer-patched, pierces shadow roots)
+      // then filter by whether the item sits inside a matching section rect
+      document.querySelectorAll('ytd-video-renderer').forEach((item) => {
+        if (foundItems.includes(item)) return;
+        const r = item.getBoundingClientRect();
+        const itemMid = r.top + r.height / 2 + window.scrollY;
+        for (const section of matchingSections) {
+          const sr = section.getBoundingClientRect();
+          const sTop = sr.top + window.scrollY;
+          const sBot = sr.bottom + window.scrollY;
+          if (itemMid >= sTop && itemMid <= sBot) {
+            foundItems.push(item);
+            break;
+          }
+        }
+      });
+    }
 
     setState(STATE.SCANNING, { count: foundItems.length });
 
