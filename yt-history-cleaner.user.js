@@ -119,7 +119,9 @@
   ];
 
   function injectStyles() {
+    if (document.getElementById('ytc-styles')) return;
     const style = document.createElement('style');
+    style.id = 'ytc-styles';
     style.textContent = STYLES;
     document.head.appendChild(style);
   }
