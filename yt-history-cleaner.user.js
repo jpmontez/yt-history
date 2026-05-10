@@ -109,6 +109,18 @@
   }
 `;
 
+  const STATE = {
+    IDLE:     'idle',
+    SCANNING: 'scanning',
+    READY:    'ready',
+    DELETING: 'deleting',
+    DONE:     'done',
+  };
+
+  let currentState = STATE.IDLE;
+  let foundItems   = [];
+  let deletedCount = 0;
+
   const TIME_RANGES = [
     { label: '1 week',   days: 7   },
     { label: '2 weeks',  days: 14  },
@@ -159,9 +171,108 @@
     return panel;
   }
 
-  function initStateIdle() {
-    // TODO: Implemented in Task 3
+  function setState(newState, data = {}) {
+    currentState = newState;
+    renderState(newState, data);
   }
+
+  function renderState(state, data = {}) {
+    const panel     = document.getElementById('ytc-panel');
+    const rangeEl   = document.getElementById('ytc-range');
+    const actionBtn = document.getElementById('ytc-action');
+
+    // Remove any existing info/hint blocks from previous state
+    panel.querySelectorAll('.ytc-info, .ytc-hint').forEach(el => el.remove());
+
+    switch (state) {
+
+      case STATE.IDLE:
+        rangeEl.disabled   = false;
+        rangeEl.onchange   = null;
+        actionBtn.textContent = 'Scan';
+        actionBtn.className   = 'ytc-btn ytc-btn-blue';
+        actionBtn.disabled    = false;
+        actionBtn.onclick     = handleScan;
+        break;
+
+      case STATE.SCANNING:
+        rangeEl.disabled      = true;
+        actionBtn.textContent = 'Scanning...';
+        actionBtn.className   = 'ytc-btn';
+        actionBtn.disabled    = true;
+        insertInfo(actionBtn, 'blue', 'Scanning...', `Found ${data.count ?? 0} items`);
+        break;
+
+      case STATE.READY:
+        rangeEl.disabled   = false;
+        rangeEl.onchange   = () => setState(STATE.IDLE);
+        actionBtn.textContent = `Delete ${data.count} items`;
+        actionBtn.className   = 'ytc-btn ytc-btn-red';
+        actionBtn.disabled    = false;
+        actionBtn.onclick     = handleDelete;
+        insertInfo(actionBtn, 'blue', 'Ready to delete', `${data.count} items found`);
+        break;
+
+      case STATE.DELETING:
+        rangeEl.disabled      = true;
+        actionBtn.textContent = 'Deleting...';
+        actionBtn.className   = 'ytc-btn';
+        actionBtn.disabled    = true;
+        insertInfo(actionBtn, 'red', 'Deleting...', `${data.deleted ?? 0} / ${data.total} deleted`);
+        break;
+
+      case STATE.DONE:
+        rangeEl.disabled      = false;
+        actionBtn.textContent = 'Scan Again';
+        actionBtn.className   = 'ytc-btn ytc-btn-blue';
+        actionBtn.disabled    = false;
+        actionBtn.onclick     = handleReset;
+        insertInfo(actionBtn, 'green', `✓ Done! Deleted ${data.count} items`, null);
+        insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
+        break;
+    }
+  }
+
+  /**
+   * Inserts an info box before `beforeNode`.
+   * Uses safe DOM methods — no innerHTML.
+   */
+  function insertInfo(beforeNode, color, labelText, strongText) {
+    const panel = document.getElementById('ytc-panel');
+    const div   = document.createElement('div');
+    div.className = `ytc-info ytc-info-${color}`;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = labelText;
+    div.appendChild(labelSpan);
+
+    if (strongText) {
+      const strong = document.createElement('strong');
+      strong.className = 'ytc-info-strong';
+      strong.textContent = strongText;
+      div.appendChild(strong);
+    }
+
+    panel.insertBefore(div, beforeNode);
+  }
+
+  function insertHint(beforeNode, text) {
+    const panel = document.getElementById('ytc-panel');
+    const div   = document.createElement('div');
+    div.className   = 'ytc-hint';
+    div.textContent = text;
+    panel.insertBefore(div, beforeNode);
+  }
+
+  function initStateIdle() {
+    foundItems   = [];
+    deletedCount = 0;
+    setState(STATE.IDLE);
+  }
+
+  function handleScan()   { console.log('[YT History Cleaner] Scan triggered'); }
+  function handleDelete() { console.log('[YT History Cleaner] Delete triggered'); }
+  function handleReset()  { initStateIdle(); }
 
   function injectPanel() {
     // Desktop: right sidebar container
