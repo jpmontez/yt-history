@@ -229,6 +229,11 @@
     pointer-events: none;
     opacity: 0.4;
   }
+  #ytc-panel .ytc-cal-cell.future {
+    color: #ccc;
+    cursor: default;
+    pointer-events: none;
+  }
   #ytc-panel .ytc-cal-hint {
     font-size: 9px;
     color: #80868b;
@@ -339,6 +344,7 @@
     monthLabel.className = 'ytc-cal-month';
 
     const nextBtn = document.createElement('button');
+    nextBtn.id = 'ytc-cal-next';
     nextBtn.className = 'ytc-cal-nav';
     nextBtn.textContent = '›';
     nextBtn.onclick = () => handleMonthNav(1);
