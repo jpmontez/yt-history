@@ -571,18 +571,21 @@
     if (!panel) return;
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
+    const calBtn    = document.getElementById('ytc-cal-btn');
 
-    panel.querySelectorAll('.ytc-info, .ytc-hint').forEach(el => el.remove());
+    panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary), .ytc-hint').forEach(el => el.remove());
 
     switch (state) {
 
       case STATE.IDLE:
-        rangeEl.disabled      = false;
+        rangeEl.disabled      = calendarMode;
         rangeEl.onchange      = null;
         actionBtn.textContent = 'Scan';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
-        actionBtn.disabled    = false;
+        actionBtn.disabled    = calendarMode && !selectedStart;
         actionBtn.onclick     = handleScan;
+        if (calBtn) calBtn.disabled = false;
+        if (calendarMode) renderCalendar();
         break;
 
       case STATE.SCANNING:
@@ -591,16 +594,20 @@
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'blue', 'Scanning...', `Found ${data.count ?? 0} items`);
+        if (calBtn) calBtn.disabled = true;
+        if (calendarMode) renderCalendar();
         break;
 
       case STATE.READY:
-        rangeEl.disabled      = false;
+        rangeEl.disabled      = calendarMode;
         rangeEl.onchange      = () => setState(STATE.IDLE);
         actionBtn.textContent = `Delete ${data.count} items`;
         actionBtn.className   = 'ytc-btn ytc-btn-red';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleDelete;
         insertInfo(actionBtn, 'blue', 'Ready to delete', `${data.count} items found`);
+        if (calBtn) calBtn.disabled = false;
+        if (calendarMode) renderCalendar();
         break;
 
       case STATE.DELETING:
@@ -609,16 +616,20 @@
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'red', 'Deleting...', `${data.deleted ?? 0} / ${data.total} deleted`);
+        if (calBtn) calBtn.disabled = true;
+        if (calendarMode) renderCalendar();
         break;
 
       case STATE.DONE:
-        rangeEl.disabled      = false;
+        rangeEl.disabled      = calendarMode;
         actionBtn.textContent = 'Scan Again';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleReset;
         insertInfo(actionBtn, 'green', `✓ Done! Deleted ${data.count} items`, null);
         insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
+        if (calBtn) calBtn.disabled = false;
+        if (calendarMode) renderCalendar();
         break;
     }
   }
