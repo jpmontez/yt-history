@@ -515,6 +515,52 @@
     }
   }
 
+  function toggleCalendarMode() {
+    calendarMode = !calendarMode;
+
+    const calBtn  = document.getElementById('ytc-cal-btn');
+    const rangeEl = document.getElementById('ytc-range');
+    const calEl   = document.getElementById('ytc-calendar');
+    const labelEl = document.querySelector('#ytc-panel .ytc-label');
+
+    if (calendarMode) {
+      calBtn.classList.add('active');
+      rangeEl.disabled         = true;
+      rangeEl.style.color      = '#aaa';
+      rangeEl.style.background = '#f5f5f5';
+      calEl.style.display      = '';
+      if (labelEl) labelEl.textContent = 'Delete history from:';
+
+      const now     = new Date();
+      calendarYear  = now.getFullYear();
+      calendarMonth = now.getMonth();
+      selectedStart = null;
+      selectedEnd   = null;
+      renderCalendar();
+
+      const actionBtn = document.getElementById('ytc-action');
+      if (actionBtn) actionBtn.disabled = true;
+    } else {
+      calBtn.classList.remove('active');
+      rangeEl.disabled         = false;
+      rangeEl.style.color      = '';
+      rangeEl.style.background = '';
+      calEl.style.display      = 'none';
+      if (labelEl) labelEl.textContent = 'Delete history older than:';
+
+      const summaryEl = document.getElementById('ytc-cal-summary');
+      if (summaryEl) summaryEl.remove();
+
+      selectedStart = null;
+      selectedEnd   = null;
+
+      const actionBtn = document.getElementById('ytc-action');
+      if (actionBtn) actionBtn.disabled = false;
+
+      if (currentState === STATE.READY) setState(STATE.IDLE);
+    }
+  }
+
   function setState(newState, data = {}) {
     currentState = newState;
     renderState(newState, data);
