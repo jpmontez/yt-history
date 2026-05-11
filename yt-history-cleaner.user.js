@@ -287,6 +287,9 @@
     label.textContent = 'Delete history older than:';
     panel.appendChild(label);
 
+    const row = document.createElement('div');
+    row.className = 'ytc-cal-row';
+
     const select = document.createElement('select');
     select.id = 'ytc-range';
     TIME_RANGES.forEach((range, i) => {
@@ -295,7 +298,18 @@
       opt.textContent = range.label;
       select.appendChild(opt);
     });
-    panel.appendChild(select);
+    row.appendChild(select);
+
+    const calBtn = document.createElement('button');
+    calBtn.id = 'ytc-cal-btn';
+    calBtn.className = 'ytc-cal-btn';
+    calBtn.textContent = '📅';
+    calBtn.title = 'Pick a custom date range';
+    calBtn.onclick = toggleCalendarMode;
+    row.appendChild(calBtn);
+
+    panel.appendChild(row);
+    panel.appendChild(buildCalendar());
 
     const btn = document.createElement('button');
     btn.id = 'ytc-action';
@@ -304,6 +318,48 @@
     panel.appendChild(btn);
 
     return panel;
+  }
+
+  function buildCalendar() {
+    const cal = document.createElement('div');
+    cal.id = 'ytc-calendar';
+    cal.className = 'ytc-calendar';
+    cal.style.display = 'none';
+
+    const header = document.createElement('div');
+    header.className = 'ytc-cal-header';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'ytc-cal-nav';
+    prevBtn.textContent = '‹';
+    prevBtn.onclick = () => handleMonthNav(-1);
+
+    const monthLabel = document.createElement('span');
+    monthLabel.id = 'ytc-cal-month';
+    monthLabel.className = 'ytc-cal-month';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'ytc-cal-nav';
+    nextBtn.textContent = '›';
+    nextBtn.onclick = () => handleMonthNav(1);
+
+    header.appendChild(prevBtn);
+    header.appendChild(monthLabel);
+    header.appendChild(nextBtn);
+    cal.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.id = 'ytc-cal-grid';
+    grid.className = 'ytc-cal-grid';
+    cal.appendChild(grid);
+
+    const hint = document.createElement('div');
+    hint.id = 'ytc-cal-hint';
+    hint.className = 'ytc-cal-hint';
+    hint.textContent = 'Select a date';
+    cal.appendChild(hint);
+
+    return cal;
   }
 
   function setState(newState, data = {}) {
