@@ -117,6 +117,124 @@
     text-align: center;
     margin-bottom: 8px;
   }
+  #ytc-panel .ytc-cal-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  #ytc-panel .ytc-cal-row select {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+  }
+  #ytc-panel .ytc-cal-btn {
+    flex-shrink: 0;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 5px 8px;
+    background: #fff;
+    color: #5f6368;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  #ytc-panel .ytc-cal-btn.active {
+    border-color: #1a73e8;
+    background: #e8f0fe;
+    color: #1a73e8;
+  }
+  #ytc-panel .ytc-cal-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  #ytc-panel .ytc-calendar {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 10px;
+    background: #fafafa;
+  }
+  #ytc-panel .ytc-cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  #ytc-panel .ytc-cal-nav {
+    font-size: 14px;
+    color: #5f6368;
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  #ytc-panel .ytc-cal-nav:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  #ytc-panel .ytc-cal-month {
+    font-size: 11px;
+    font-weight: 600;
+    color: #202124;
+  }
+  #ytc-panel .ytc-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+  }
+  #ytc-panel .ytc-cal-dh {
+    font-size: 9px;
+    color: #80868b;
+    padding: 1px 0;
+  }
+  #ytc-panel .ytc-cal-cell {
+    font-size: 10px;
+    padding: 3px 0;
+    cursor: pointer;
+    border-radius: 50%;
+    color: #202124;
+  }
+  #ytc-panel .ytc-cal-cell.spillover {
+    color: #ccc;
+    cursor: default;
+    pointer-events: none;
+  }
+  #ytc-panel .ytc-cal-cell.in-range {
+    background: #e8f0fe;
+    color: #1a73e8;
+    border-radius: 0;
+  }
+  #ytc-panel .ytc-cal-cell.range-start {
+    background: #1a73e8;
+    color: #fff;
+    border-radius: 50% 0 0 50%;
+    font-weight: 600;
+  }
+  #ytc-panel .ytc-cal-cell.range-end {
+    background: #1a73e8;
+    color: #fff;
+    border-radius: 0 50% 50% 0;
+    font-weight: 600;
+  }
+  #ytc-panel .ytc-cal-cell.selected-single {
+    background: #1a73e8;
+    color: #fff;
+    border-radius: 50%;
+    font-weight: 600;
+  }
+  #ytc-panel .ytc-cal-cell.cell-disabled {
+    pointer-events: none;
+    opacity: 0.4;
+  }
+  #ytc-panel .ytc-cal-hint {
+    font-size: 9px;
+    color: #80868b;
+    text-align: center;
+    margin-top: 6px;
+  }
 `;
 
   const STATE = {
