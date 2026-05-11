@@ -584,7 +584,7 @@
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = calendarMode && !selectedStart;
         actionBtn.onclick     = handleScan;
-        if (calBtn) calBtn.disabled = false;
+        calBtn.disabled = false;
         if (calendarMode) renderCalendar();
         break;
 
@@ -594,7 +594,7 @@
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'blue', 'Scanning...', `Found ${data.count ?? 0} items`);
-        if (calBtn) calBtn.disabled = true;
+        calBtn.disabled = true;
         if (calendarMode) renderCalendar();
         break;
 
@@ -606,7 +606,7 @@
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleDelete;
         insertInfo(actionBtn, 'blue', 'Ready to delete', `${data.count} items found`);
-        if (calBtn) calBtn.disabled = false;
+        calBtn.disabled = false;
         if (calendarMode) renderCalendar();
         break;
 
@@ -616,7 +616,7 @@
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'red', 'Deleting...', `${data.deleted ?? 0} / ${data.total} deleted`);
-        if (calBtn) calBtn.disabled = true;
+        calBtn.disabled = true;
         if (calendarMode) renderCalendar();
         break;
 
@@ -628,7 +628,7 @@
         actionBtn.onclick     = handleReset;
         insertInfo(actionBtn, 'green', `✓ Done! Deleted ${data.count} items`, null);
         insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
-        if (calBtn) calBtn.disabled = false;
+        calBtn.disabled = false;
         if (calendarMode) renderCalendar();
         break;
     }
