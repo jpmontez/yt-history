@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.2
+// @version      1.3
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/feed/history*
 // @match        *://youtube.com/feed/history*
@@ -41,7 +41,7 @@
 
   const STYLES = `
   #ytc-panel {
-    font-family: 'Roboto', sans-serif;
+    font-family: 'DM Sans', 'Roboto', sans-serif;
     background: #fff;
     border: 1px solid #e0e0e0;
     border-radius: 12px;
@@ -54,10 +54,49 @@
   #ytc-panel .ytc-title {
     font-size: 11px;
     font-weight: 700;
-    color: #ff0000;
-    letter-spacing: 0.4px;
+    color: #0f0f0f;
+    letter-spacing: 0.5px;
     margin-bottom: 10px;
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  #ytc-panel .ytc-title-icon {
+    color: #CC0000;
+    font-size: 10px;
+  }
+  #ytc-panel .ytc-seg {
+    display: flex;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  #ytc-panel .ytc-seg-btn {
+    flex: 1;
+    border: none;
+    background: #f8f9fa;
+    padding: 6px 4px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'DM Sans', 'Roboto', sans-serif;
+    cursor: pointer;
+    color: #5f6368;
+    transition: background 0.15s ease, color 0.15s ease;
+    line-height: 1;
+  }
+  #ytc-panel .ytc-seg-btn:not(:last-child) {
+    border-right: 1px solid #e0e0e0;
+  }
+  #ytc-panel .ytc-seg-btn.active {
+    background: #1a73e8;
+    color: #fff;
+    font-weight: 600;
+  }
+  #ytc-panel .ytc-seg-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
   #ytc-panel .ytc-label {
     font-size: 11px;
@@ -67,7 +106,8 @@
   #ytc-panel select {
     width: 100%;
     font-size: 12px;
-    border: 1px solid #ccc;
+    font-family: 'DM Sans', 'Roboto', sans-serif;
+    border: 1px solid #e0e0e0;
     border-radius: 6px;
     padding: 5px 8px;
     margin-bottom: 10px;
@@ -83,10 +123,19 @@
     width: 100%;
     border: none;
     border-radius: 6px;
-    padding: 7px 0;
+    padding: 8px 0;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
+    font-family: 'DM Sans', 'Roboto', sans-serif;
     cursor: pointer;
+    letter-spacing: 0.2px;
+    transition: background 0.2s ease, opacity 0.15s ease, transform 0.1s ease;
+  }
+  #ytc-panel .ytc-btn:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+  #ytc-panel .ytc-btn:active:not(:disabled) {
+    transform: scale(0.98);
   }
   #ytc-panel .ytc-btn:disabled {
     background: #ccc !important;
@@ -117,42 +166,11 @@
     text-align: center;
     margin-bottom: 8px;
   }
-  #ytc-panel .ytc-cal-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    margin-bottom: 10px;
-  }
-  #ytc-panel .ytc-cal-row select {
-    flex: 1;
-    min-width: 0;
-    margin-bottom: 0;
-  }
-  #ytc-panel .ytc-cal-btn {
-    flex-shrink: 0;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 5px 8px;
-    background: #fff;
-    color: #5f6368;
-    font-size: 14px;
-    cursor: pointer;
-    line-height: 1;
-  }
-  #ytc-panel .ytc-cal-btn.active {
-    border-color: #1a73e8;
-    background: #e8f0fe;
-    color: #1a73e8;
-  }
-  #ytc-panel .ytc-cal-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
   #ytc-panel .ytc-calendar {
     border: 1px solid #e0e0e0;
     border-radius: 8px;
     padding: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     background: #fafafa;
   }
   #ytc-panel .ytc-cal-header {
@@ -169,6 +187,10 @@
     background: none;
     padding: 0 4px;
     line-height: 1;
+    transition: color 0.15s ease;
+  }
+  #ytc-panel .ytc-cal-nav:hover:not(:disabled) {
+    color: #1a73e8;
   }
   #ytc-panel .ytc-cal-nav:disabled {
     opacity: 0.3;
@@ -193,10 +215,18 @@
   }
   #ytc-panel .ytc-cal-cell {
     font-size: 10px;
-    padding: 3px 0;
+    padding: 5px 0;
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     border-radius: 50%;
     color: #202124;
+    transition: background 0.1s ease;
+  }
+  #ytc-panel .ytc-cal-cell:hover:not(.spillover):not(.future):not(.cell-disabled):not(.in-range):not(.range-start):not(.range-end):not(.selected-single) {
+    background: #f1f3f4;
   }
   #ytc-panel .ytc-cal-cell.spillover {
     color: #ccc;
@@ -211,13 +241,13 @@
   #ytc-panel .ytc-cal-cell.range-start {
     background: #1a73e8;
     color: #fff;
-    border-radius: 4px 0 0 4px;
+    border-radius: 6px 0 0 6px;
     font-weight: 600;
   }
   #ytc-panel .ytc-cal-cell.range-end {
     background: #1a73e8;
     color: #fff;
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 6px 6px 0;
     font-weight: 600;
   }
   #ytc-panel .ytc-cal-cell.selected-single {
@@ -236,10 +266,34 @@
     pointer-events: none;
   }
   #ytc-panel .ytc-cal-hint {
-    font-size: 9px;
+    font-size: 11px;
     color: #80868b;
     text-align: center;
     margin-top: 6px;
+  }
+  #ytc-panel #ytc-cal-summary {
+    display: flex;
+    align-items: center;
+    text-align: left;
+    gap: 8px;
+  }
+  #ytc-panel #ytc-cal-summary .ytc-summary-text {
+    flex: 1;
+  }
+  #ytc-panel .ytc-cal-clear {
+    border: none;
+    background: none;
+    color: #80868b;
+    font-size: 11px;
+    font-family: 'DM Sans', 'Roboto', sans-serif;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    text-decoration: underline;
+    transition: color 0.15s ease;
+  }
+  #ytc-panel .ytc-cal-clear:hover {
+    color: #d93025;
   }
 `;
 
@@ -260,6 +314,7 @@
   let calendarMonth = 0;
   let selectedStart = null; // Date | null — always the earlier of the two picked dates
   let selectedEnd   = null; // Date | null — always the later of the two picked dates
+  let hoverDate     = null; // Date | null — preview end while awaiting 2nd click
 
   const TIME_RANGES = [
     { label: '1 day',    days: 1   },
@@ -272,6 +327,13 @@
   ];
 
   function injectStyles() {
+    if (!document.getElementById('ytc-font')) {
+      const link = document.createElement('link');
+      link.id   = 'ytc-font';
+      link.rel  = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap';
+      document.head.appendChild(link);
+    }
     if (document.getElementById('ytc-styles')) return;
     const style = document.createElement('style');
     style.id = 'ytc-styles';
@@ -285,40 +347,68 @@
 
     const title = document.createElement('div');
     title.className = 'ytc-title';
-    title.textContent = 'YT History Cleaner';
+    const icon = document.createElement('span');
+    icon.className   = 'ytc-title-icon';
+    icon.textContent = '▶';
+    title.appendChild(icon);
+    title.appendChild(document.createTextNode('YT History Cleaner'));
     panel.appendChild(title);
 
-    const label = document.createElement('div');
-    label.className = 'ytc-label';
-    label.textContent = 'Delete history older than:';
-    panel.appendChild(label);
+    // Segmented mode control
+    const seg = document.createElement('div');
+    seg.className = 'ytc-seg';
 
-    const row = document.createElement('div');
-    row.className = 'ytc-cal-row';
+    const quickBtn = document.createElement('button');
+    quickBtn.id        = 'ytc-seg-quick';
+    quickBtn.className = 'ytc-seg-btn active';
+    quickBtn.textContent = 'Quick';
+    quickBtn.onclick   = () => setCalendarMode('quick');
+
+    const customBtn = document.createElement('button');
+    customBtn.id        = 'ytc-seg-custom';
+    customBtn.className = 'ytc-seg-btn';
+    customBtn.textContent = 'Custom Date';
+    customBtn.onclick   = () => setCalendarMode('custom');
+
+    seg.appendChild(quickBtn);
+    seg.appendChild(customBtn);
+    panel.appendChild(seg);
+
+    // Quick section
+    const quickSection = document.createElement('div');
+    quickSection.id = 'ytc-quick-section';
+
+    const label = document.createElement('div');
+    label.className   = 'ytc-label';
+    label.textContent = 'Delete history older than:';
+    quickSection.appendChild(label);
 
     const select = document.createElement('select');
     select.id = 'ytc-range';
     TIME_RANGES.forEach((range, i) => {
       const opt = document.createElement('option');
-      opt.value = String(i);
+      opt.value       = String(i);
       opt.textContent = range.label;
       select.appendChild(opt);
     });
-    row.appendChild(select);
+    quickSection.appendChild(select);
+    panel.appendChild(quickSection);
 
-    const calBtn = document.createElement('button');
-    calBtn.id = 'ytc-cal-btn';
-    calBtn.className = 'ytc-cal-btn';
-    calBtn.textContent = '📅';
-    calBtn.title = 'Pick a custom date range';
-    calBtn.onclick = toggleCalendarMode;
-    row.appendChild(calBtn);
+    // Custom date section
+    const customSection = document.createElement('div');
+    customSection.id           = 'ytc-custom-section';
+    customSection.style.display = 'none';
 
-    panel.appendChild(row);
-    panel.appendChild(buildCalendar());
+    const calLabel = document.createElement('div');
+    calLabel.className   = 'ytc-label';
+    calLabel.textContent = 'Delete history from:';
+    customSection.appendChild(calLabel);
+
+    customSection.appendChild(buildCalendar());
+    panel.appendChild(customSection);
 
     const btn = document.createElement('button');
-    btn.id = 'ytc-action';
+    btn.id        = 'ytc-action';
     btn.className = 'ytc-btn ytc-btn-blue';
     btn.textContent = 'Scan';
     panel.appendChild(btn);
@@ -328,27 +418,26 @@
 
   function buildCalendar() {
     const cal = document.createElement('div');
-    cal.id = 'ytc-calendar';
+    cal.id        = 'ytc-calendar';
     cal.className = 'ytc-calendar';
-    cal.style.display = 'none';
 
     const header = document.createElement('div');
     header.className = 'ytc-cal-header';
 
     const prevBtn = document.createElement('button');
-    prevBtn.className = 'ytc-cal-nav';
+    prevBtn.className   = 'ytc-cal-nav';
     prevBtn.textContent = '‹';
-    prevBtn.onclick = () => handleMonthNav(-1);
+    prevBtn.onclick     = () => handleMonthNav(-1);
 
     const monthLabel = document.createElement('span');
-    monthLabel.id = 'ytc-cal-month';
+    monthLabel.id        = 'ytc-cal-month';
     monthLabel.className = 'ytc-cal-month';
 
     const nextBtn = document.createElement('button');
-    nextBtn.id = 'ytc-cal-next';
-    nextBtn.className = 'ytc-cal-nav';
+    nextBtn.id          = 'ytc-cal-next';
+    nextBtn.className   = 'ytc-cal-nav';
     nextBtn.textContent = '›';
-    nextBtn.onclick = () => handleMonthNav(1);
+    nextBtn.onclick     = () => handleMonthNav(1);
 
     header.appendChild(prevBtn);
     header.appendChild(monthLabel);
@@ -356,17 +445,84 @@
     cal.appendChild(header);
 
     const grid = document.createElement('div');
-    grid.id = 'ytc-cal-grid';
+    grid.id        = 'ytc-cal-grid';
     grid.className = 'ytc-cal-grid';
+
+    // Event delegation for hover preview — attached once, works across re-renders
+    grid.addEventListener('mouseover', handleGridMouseOver);
+    grid.addEventListener('mouseleave', handleGridMouseLeave);
+
     cal.appendChild(grid);
 
     const hint = document.createElement('div');
-    hint.id = 'ytc-cal-hint';
-    hint.className = 'ytc-cal-hint';
+    hint.id          = 'ytc-cal-hint';
+    hint.className   = 'ytc-cal-hint';
     hint.textContent = 'Select a date';
     cal.appendChild(hint);
 
     return cal;
+  }
+
+  function handleGridMouseOver(e) {
+    if (!selectedStart || selectedEnd) return;
+    const cell = e.target;
+    if (!cell.dataset.day) return;
+    if (cell.classList.contains('spillover') || cell.classList.contains('future') || cell.classList.contains('cell-disabled')) {
+      if (hoverDate) { hoverDate = null; applyCalendarClasses(); }
+      return;
+    }
+    const day      = parseInt(cell.dataset.day, 10);
+    const newHover = new Date(calendarYear, calendarMonth, day);
+    if (!hoverDate || hoverDate.getTime() !== newHover.getTime()) {
+      hoverDate = newHover;
+      applyCalendarClasses();
+    }
+  }
+
+  function handleGridMouseLeave() {
+    if (hoverDate) {
+      hoverDate = null;
+      applyCalendarClasses();
+    }
+  }
+
+  function applyCalendarClasses() {
+    const grid = document.getElementById('ytc-cal-grid');
+    if (!grid) return;
+
+    const startMs = selectedStart ? selectedStart.getTime() : null;
+    const endMs   = selectedEnd   ? selectedEnd.getTime()   : null;
+
+    let previewStartMs = null;
+    let previewEndMs   = null;
+    if (startMs !== null && endMs === null && hoverDate) {
+      const hMs = hoverDate.getTime();
+      if (hMs !== startMs) {
+        previewStartMs = Math.min(startMs, hMs);
+        previewEndMs   = Math.max(startMs, hMs);
+      }
+    }
+
+    grid.querySelectorAll('.ytc-cal-cell:not(.spillover):not(.future):not(.cell-disabled)').forEach(cell => {
+      const day = parseInt(cell.dataset.day, 10);
+      if (!day) return;
+      const cellMs = new Date(calendarYear, calendarMonth, day).getTime();
+
+      cell.classList.remove('range-start', 'range-end', 'in-range', 'selected-single');
+
+      if (startMs !== null && endMs !== null) {
+        if      (cellMs === startMs)                   cell.classList.add('range-start');
+        else if (cellMs === endMs)                     cell.classList.add('range-end');
+        else if (cellMs > startMs && cellMs < endMs)   cell.classList.add('in-range');
+      } else if (previewStartMs !== null) {
+        if      (cellMs === previewStartMs)                              cell.classList.add('range-start');
+        else if (cellMs === previewEndMs)                                cell.classList.add('range-end');
+        else if (cellMs > previewStartMs && cellMs < previewEndMs)       cell.classList.add('in-range');
+        else if (cellMs === startMs)                                     cell.classList.add('selected-single');
+      } else if (startMs !== null && cellMs === startMs) {
+        cell.classList.add('selected-single');
+      }
+    });
   }
 
   const CAL_MONTHS = [
@@ -375,16 +531,19 @@
   ];
 
   function updateCalendarSummary() {
-    const calEl = document.getElementById('ytc-calendar');
-    if (!calEl) return;
+    const customSection = document.getElementById('ytc-custom-section');
+    if (!customSection) return;
 
     const existing = document.getElementById('ytc-cal-summary');
     if (existing) existing.remove();
     if (!selectedStart) return;
 
     const summary = document.createElement('div');
-    summary.id = 'ytc-cal-summary';
+    summary.id        = 'ytc-cal-summary';
     summary.className = 'ytc-info ytc-info-blue';
+
+    const textWrap = document.createElement('div');
+    textWrap.className = 'ytc-summary-text';
 
     let labelText, strongText;
     if (!selectedEnd) {
@@ -401,14 +560,29 @@
 
     const labelSpan = document.createElement('span');
     labelSpan.textContent = labelText;
-    summary.appendChild(labelSpan);
+    textWrap.appendChild(labelSpan);
 
     const strong = document.createElement('strong');
-    strong.className = 'ytc-info-strong';
+    strong.className   = 'ytc-info-strong';
     strong.textContent = strongText;
-    summary.appendChild(strong);
+    textWrap.appendChild(strong);
 
-    calEl.insertAdjacentElement('afterend', summary);
+    const clearBtn = document.createElement('button');
+    clearBtn.className   = 'ytc-cal-clear';
+    clearBtn.textContent = '× Clear';
+    clearBtn.onclick     = () => {
+      selectedStart = null;
+      selectedEnd   = null;
+      hoverDate     = null;
+      renderCalendar();
+      const actionBtn = document.getElementById('ytc-action');
+      if (actionBtn) actionBtn.disabled = true;
+      if (currentState === STATE.READY) setState(STATE.IDLE);
+    };
+
+    summary.appendChild(textWrap);
+    summary.appendChild(clearBtn);
+    customSection.appendChild(summary);
   }
 
   function renderCalendar() {
@@ -418,11 +592,11 @@
     if (!monthLabel || !grid || !hint) return;
 
     monthLabel.textContent = `${CAL_MONTHS[calendarMonth]} ${calendarYear}`;
-    grid.replaceChildren(); // clear previous cells safely
+    grid.replaceChildren();
 
     ['S','M','T','W','T','F','S'].forEach(d => {
       const dh = document.createElement('div');
-      dh.className = 'ytc-cal-dh';
+      dh.className   = 'ytc-cal-dh';
       dh.textContent = d;
       grid.appendChild(dh);
     });
@@ -431,32 +605,22 @@
     const daysInMonth   = new Date(calendarYear, calendarMonth + 1, 0).getDate();
     const daysInPrevMon = new Date(calendarYear, calendarMonth, 0).getDate();
     const isDisabled    = currentState === STATE.SCANNING || currentState === STATE.DELETING;
-    const startMs       = selectedStart ? selectedStart.getTime() : null;
-    const endMs         = selectedEnd   ? selectedEnd.getTime()   : null;
     const _now          = new Date();
     const today         = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
 
     for (let i = firstDay - 1; i >= 0; i--) {
       const cell = document.createElement('div');
-      cell.className = 'ytc-cal-cell spillover';
+      cell.className   = 'ytc-cal-cell spillover';
       cell.textContent = String(daysInPrevMon - i);
       grid.appendChild(cell);
     }
 
     for (let day = 1; day <= daysInMonth; day++) {
       const cellDate = new Date(calendarYear, calendarMonth, day);
-      const cellMs   = cellDate.getTime();
       const cell     = document.createElement('div');
-      cell.className = 'ytc-cal-cell';
-      cell.textContent = String(day);
-
-      if (startMs !== null && endMs !== null) {
-        if      (cellMs === startMs)                 cell.classList.add('range-start');
-        else if (cellMs === endMs)                   cell.classList.add('range-end');
-        else if (cellMs > startMs && cellMs < endMs) cell.classList.add('in-range');
-      } else if (startMs !== null && cellMs === startMs) {
-        cell.classList.add('selected-single');
-      }
+      cell.className       = 'ytc-cal-cell';
+      cell.textContent     = String(day);
+      cell.dataset.day     = String(day);
 
       if (cellDate > today) {
         cell.classList.add('future');
@@ -473,10 +637,13 @@
     const trailingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
     for (let i = 1; i <= trailingCells; i++) {
       const cell = document.createElement('div');
-      cell.className = 'ytc-cal-cell spillover';
+      cell.className   = 'ytc-cal-cell spillover';
       cell.textContent = String(i);
       grid.appendChild(cell);
     }
+
+    // Apply selection / hover-preview classes to the freshly built cells
+    applyCalendarClasses();
 
     hint.textContent = !selectedStart
       ? 'Select a date'
@@ -500,22 +667,21 @@
   }
 
   function handleDateClick(date) {
+    hoverDate = null;
+
     if (!selectedStart) {
       selectedStart = date;
       selectedEnd   = null;
     } else if (!selectedEnd) {
       if (date.getTime() === selectedStart.getTime()) {
-        // Same date tapped again — reset
         selectedStart = null;
       } else if (date < selectedStart) {
-        // Clicked earlier date first — keep start always earlier
         selectedEnd   = selectedStart;
         selectedStart = date;
       } else {
         selectedEnd = date;
       }
     } else {
-      // Third click — start fresh with this date
       selectedStart = date;
       selectedEnd   = null;
     }
@@ -524,51 +690,48 @@
 
     renderCalendar();
 
-    // Keep Scan button in sync with selection
     const actionBtn = document.getElementById('ytc-action');
     if (actionBtn && currentState === STATE.IDLE) {
       actionBtn.disabled = !selectedStart;
     }
   }
 
-  function toggleCalendarMode() {
-    calendarMode = !calendarMode;
+  function setCalendarMode(mode) {
+    calendarMode = (mode === 'custom');
 
-    const calBtn  = document.getElementById('ytc-cal-btn');
-    const rangeEl = document.getElementById('ytc-range');
-    const calEl   = document.getElementById('ytc-calendar');
-    const labelEl = document.querySelector('#ytc-panel .ytc-label');
+    const quickBtn     = document.getElementById('ytc-seg-quick');
+    const customBtn    = document.getElementById('ytc-seg-custom');
+    const quickSection = document.getElementById('ytc-quick-section');
+    const customSection = document.getElementById('ytc-custom-section');
 
     if (calendarMode) {
-      calBtn.classList.add('active');
-      rangeEl.disabled         = true;
-      rangeEl.style.color      = '#aaa';
-      rangeEl.style.background = '#f5f5f5';
-      calEl.style.display      = '';
-      if (labelEl) labelEl.textContent = 'Delete history from:';
+      quickBtn.classList.remove('active');
+      customBtn.classList.add('active');
+      quickSection.style.display  = 'none';
+      customSection.style.display = '';
 
       const now     = new Date();
       calendarYear  = now.getFullYear();
       calendarMonth = now.getMonth();
       selectedStart = null;
       selectedEnd   = null;
+      hoverDate     = null;
       renderCalendar();
 
       const actionBtn = document.getElementById('ytc-action');
       if (actionBtn) actionBtn.disabled = true;
     } else {
-      calBtn.classList.remove('active');
-      rangeEl.disabled         = false;
-      rangeEl.style.color      = '';
-      rangeEl.style.background = '';
-      calEl.style.display      = 'none';
-      if (labelEl) labelEl.textContent = 'Delete history older than:';
+      quickBtn.classList.add('active');
+      customBtn.classList.remove('active');
+      quickSection.style.display  = '';
+      customSection.style.display = 'none';
 
       const summaryEl = document.getElementById('ytc-cal-summary');
       if (summaryEl) summaryEl.remove();
 
       selectedStart = null;
       selectedEnd   = null;
+      hoverDate     = null;
 
       const actionBtn = document.getElementById('ytc-action');
       if (actionBtn) actionBtn.disabled = false;
@@ -587,67 +750,68 @@
     if (!panel) return;
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
-    const calBtn    = document.getElementById('ytc-cal-btn');
 
     panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary), .ytc-hint').forEach(el => el.remove());
 
     switch (state) {
 
       case STATE.IDLE:
-        rangeEl.disabled      = calendarMode;
-        rangeEl.onchange      = null;
+        if (rangeEl) { rangeEl.disabled = false; rangeEl.onchange = null; }
         actionBtn.textContent = 'Scan';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = calendarMode && !selectedStart;
         actionBtn.onclick     = handleScan;
-        calBtn.disabled = false;
+        setSegButtonsDisabled(false);
         if (calendarMode) renderCalendar();
         break;
 
       case STATE.SCANNING:
-        rangeEl.disabled      = true;
+        if (rangeEl) rangeEl.disabled = true;
         actionBtn.textContent = 'Scanning...';
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'blue', 'Scanning...', `Found ${data.count ?? 0} items`);
-        calBtn.disabled = true;
+        setSegButtonsDisabled(true);
         if (calendarMode) renderCalendar();
         break;
 
       case STATE.READY:
-        rangeEl.disabled      = calendarMode;
-        rangeEl.onchange      = () => setState(STATE.IDLE);
+        if (rangeEl) { rangeEl.disabled = false; rangeEl.onchange = () => setState(STATE.IDLE); }
         actionBtn.textContent = `Delete ${data.count} items`;
         actionBtn.className   = 'ytc-btn ytc-btn-red';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleDelete;
         insertInfo(actionBtn, 'blue', 'Ready to delete', `${data.count} items found`);
-        calBtn.disabled = false;
+        setSegButtonsDisabled(false);
         if (calendarMode) renderCalendar();
         break;
 
       case STATE.DELETING:
-        rangeEl.disabled      = true;
+        if (rangeEl) rangeEl.disabled = true;
         actionBtn.textContent = 'Deleting...';
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'red', 'Deleting...', `${data.deleted ?? 0} / ${data.total} deleted`);
-        calBtn.disabled = true;
+        setSegButtonsDisabled(true);
         if (calendarMode) renderCalendar();
         break;
 
       case STATE.DONE:
-        rangeEl.disabled      = calendarMode;
+        if (rangeEl) rangeEl.disabled = false;
         actionBtn.textContent = 'Scan Again';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleReset;
         insertInfo(actionBtn, 'green', `✓ Done! Deleted ${data.count} items`, null);
         insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
-        calBtn.disabled = false;
+        setSegButtonsDisabled(false);
         if (calendarMode) renderCalendar();
         break;
     }
+  }
+
+  function setSegButtonsDisabled(disabled) {
+    document.querySelectorAll('#ytc-panel .ytc-seg-btn').forEach(b => b.disabled = disabled);
   }
 
   function insertInfo(beforeNode, color, labelText, strongText) {
@@ -661,7 +825,7 @@
 
     if (strongText) {
       const strong = document.createElement('strong');
-      strong.className = 'ytc-info-strong';
+      strong.className   = 'ytc-info-strong';
       strong.textContent = strongText;
       div.appendChild(strong);
     }
@@ -683,7 +847,17 @@
     calendarMode  = false;
     selectedStart = null;
     selectedEnd   = null;
+    hoverDate     = null;
     setState(STATE.IDLE);
+    // Ensure segmented control reflects Quick mode
+    const quickBtn  = document.getElementById('ytc-seg-quick');
+    const customBtn = document.getElementById('ytc-seg-custom');
+    if (quickBtn)  quickBtn.classList.add('active');
+    if (customBtn) customBtn.classList.remove('active');
+    const quickSection  = document.getElementById('ytc-quick-section');
+    const customSection = document.getElementById('ytc-custom-section');
+    if (quickSection)  quickSection.style.display  = '';
+    if (customSection) customSection.style.display = 'none';
   }
 
   const SCROLL_PAUSE_MS = 1200;
@@ -929,6 +1103,7 @@
   function handleReset() {
     selectedStart = null;
     selectedEnd   = null;
+    hoverDate     = null;
     const summaryEl = document.getElementById('ytc-cal-summary');
     if (summaryEl) summaryEl.remove();
     initStateIdle();
