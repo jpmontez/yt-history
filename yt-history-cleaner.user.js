@@ -249,6 +249,12 @@
   let foundItems   = [];
   let deletedCount = 0;
 
+  let calendarMode  = false;
+  let calendarYear  = 0;
+  let calendarMonth = 0;
+  let selectedStart = null; // Date | null — always the earlier of the two picked dates
+  let selectedEnd   = null; // Date | null — always the later of the two picked dates
+
   const TIME_RANGES = [
     { label: '1 day',    days: 1   },
     { label: '1 week',   days: 7   },
