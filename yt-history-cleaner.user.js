@@ -907,7 +907,13 @@
     }, DELETE_STEP_MS);
   }
 
-  function handleReset() { initStateIdle(); }
+  function handleReset() {
+    selectedStart = null;
+    selectedEnd   = null;
+    const summaryEl = document.getElementById('ytc-cal-summary');
+    if (summaryEl) summaryEl.remove();
+    initStateIdle();
+  }
 
   function injectPanel() {
     const isMobile = window.innerWidth < 1014;
