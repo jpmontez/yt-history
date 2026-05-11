@@ -46,10 +46,9 @@
     border: 1px solid #e0e0e0;
     border-radius: 12px;
     padding: 14px;
-    margin: 12px 0 0 0;
+    margin: 12px 16px 0 0;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
-    width: 100%;
     position: sticky;
     top: 72px;
     max-height: calc(100vh - 96px);
