@@ -46,7 +46,7 @@
     border: 1px solid #e0e0e0;
     border-radius: 12px;
     padding: 14px;
-    margin: 12px 0 8px 0;
+    margin: 12px 0 0 0;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
     width: 100%;
@@ -55,6 +55,10 @@
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     z-index: 1;
+  }
+  #ytc-panel + * {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
   }
   #ytc-panel .ytc-title {
     font-size: 11px;
