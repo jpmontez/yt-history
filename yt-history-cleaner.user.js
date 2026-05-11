@@ -50,6 +50,8 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
     width: 100%;
+    max-height: calc(100vh - 70px);
+    overflow-y: auto;
   }
   #ytc-panel .ytc-title {
     font-size: 11px;
