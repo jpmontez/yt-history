@@ -22,19 +22,13 @@ Works entirely through the YouTube UI — no API keys, no external dependencies,
 
 The panel appears in the sidebar on desktop, or above the video feed on mobile.
 
-1. **Choose a time range** from the dropdown (e.g. "1 month" = delete everything older than 30 days), or click the **📅** button to pick a specific date or date range (see [Custom Date Picker](#custom-date-picker) below).
+1. Choose a mode using the **Quick / Custom Date** control at the top of the panel.
+   - **Quick:** Pick a preset time range from the dropdown (e.g. "1 month" = delete everything older than 30 days).
+   - **Custom Date:** Use the calendar picker to select an exact date or date range (see [Custom Date Picker](#custom-date-picker) below).
 2. Click **Scan** — the script auto-scrolls the page to load all matching history entries into memory and shows a live count.
-
-   <img src="docs/screenshots/idle.png" width="600" alt="Idle state — time range picker and Scan button">
-
 3. Once scanning is complete, click **Delete N items** to begin deletion.
-
-   <img src="docs/screenshots/ready-to-delete.png" width="600" alt="Ready state — item count and Delete button">
-
-4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A live counter shows progress.
+4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A progress bar tracks completion.
 5. When finished, a green confirmation shows how many items were deleted. **Refresh the page** to see the changes reflected.
-
-   <img src="docs/screenshots/done.png" width="600" alt="Done state — green success confirmation">
 
 ---
 
@@ -56,15 +50,15 @@ Changing the dropdown after a scan resets the panel back to Idle, so you can re-
 
 ## Custom Date Picker
 
-Click the **📅** button to the right of the dropdown to open the calendar widget.
+Select **Custom Date** in the mode control at the top of the panel to open the calendar widget.
 
 - **Single date:** Click one date — deletes everything older than that date (same semantics as the preset options, but with an exact cutoff you choose). The Scan button activates immediately.
-- **Date range:** Click a start date, then a second date — order doesn't matter, the earlier date always becomes the start. Everything within that window (inclusive) is queued for deletion. The summary updates to show the span and day count.
+- **Date range:** Click a start date, then a second date — order doesn't matter, the earlier date always becomes the start. Everything within that window (inclusive) is queued for deletion. The summary shows the span, day count, and a **× Clear** button to reset.
 - **Reset:** Clicking a third date resets the selection and starts over with that date as a new single selection.
 
-While the calendar is open the preset dropdown is disabled. Click **📅** again to close the calendar, re-enable the dropdown, and clear the selection.
+Switching back to **Quick** mode clears the calendar selection and re-enables the preset dropdown.
 
-Use **‹** / **›** in the calendar header to navigate between months.
+Use **‹** / **›** in the calendar header to navigate between months. Future dates and the current month's "next" arrow are automatically disabled.
 
 ---
 

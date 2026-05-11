@@ -90,7 +90,7 @@
     border-right: 1px solid #e0e0e0;
   }
   #ytc-panel .ytc-seg-btn.active {
-    background: #1a73e8;
+    background: #1557b0;
     color: #fff;
     font-weight: 600;
   }
@@ -224,6 +224,7 @@
     border-radius: 50%;
     color: #202124;
     transition: background 0.1s ease;
+    position: relative;
   }
   #ytc-panel .ytc-cal-cell:hover:not(.spillover):not(.future):not(.cell-disabled):not(.in-range):not(.range-start):not(.range-end):not(.selected-single) {
     background: #f1f3f4;
@@ -265,6 +266,21 @@
     cursor: default;
     pointer-events: none;
   }
+  #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range) {
+    font-weight: 700;
+    color: #1a73e8;
+  }
+  #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range)::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: #1a73e8;
+  }
   #ytc-panel .ytc-cal-hint {
     font-size: 11px;
     color: #80868b;
@@ -294,6 +310,27 @@
   }
   #ytc-panel .ytc-cal-clear:hover {
     color: #d93025;
+  }
+  @keyframes ytc-fadein {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  #ytc-panel .ytc-info:not(#ytc-cal-summary) {
+    animation: ytc-fadein 0.18s ease forwards;
+  }
+  #ytc-panel .ytc-progress-wrap {
+    margin-top: 6px;
+    height: 3px;
+    background: rgba(0,0,0,0.12);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  #ytc-panel .ytc-progress-bar {
+    height: 100%;
+    border-radius: 99px;
+    background: currentColor;
+    transition: width 0.35s ease;
+    min-width: 4px;
   }
 `;
 
@@ -622,6 +659,8 @@
       cell.textContent     = String(day);
       cell.dataset.day     = String(day);
 
+      if (cellDate.getTime() === today.getTime()) cell.classList.add('today');
+
       if (cellDate > today) {
         cell.classList.add('future');
       } else if (isDisabled) {
@@ -791,7 +830,7 @@
         actionBtn.textContent = 'Deleting...';
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
-        insertInfo(actionBtn, 'red', 'Deleting...', `${data.deleted ?? 0} / ${data.total} deleted`);
+        insertInfo(actionBtn, 'red', 'Deleting...', `0 / ${data.total} deleted`, 0);
         setSegButtonsDisabled(true);
         if (calendarMode) renderCalendar();
         break;
@@ -814,7 +853,7 @@
     document.querySelectorAll('#ytc-panel .ytc-seg-btn').forEach(b => b.disabled = disabled);
   }
 
-  function insertInfo(beforeNode, color, labelText, strongText) {
+  function insertInfo(beforeNode, color, labelText, strongText, progress) {
     const panel = document.getElementById('ytc-panel');
     const div   = document.createElement('div');
     div.className = `ytc-info ytc-info-${color}`;
@@ -830,6 +869,16 @@
       div.appendChild(strong);
     }
 
+    if (progress !== undefined && progress !== null) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ytc-progress-wrap';
+      const bar = document.createElement('div');
+      bar.className  = 'ytc-progress-bar';
+      bar.style.width = `${Math.round(progress * 100)}%`;
+      wrap.appendChild(bar);
+      div.appendChild(wrap);
+    }
+
     panel.insertBefore(div, beforeNode);
   }
 
@@ -839,6 +888,18 @@
     div.className   = 'ytc-hint';
     div.textContent = text;
     panel.insertBefore(div, beforeNode);
+  }
+
+  function updateScanningCount(count) {
+    const strong = document.querySelector('#ytc-panel .ytc-info-blue:not(#ytc-cal-summary) .ytc-info-strong');
+    if (strong) strong.textContent = `Found ${count} items`;
+  }
+
+  function updateDeletingProgress(deleted, total) {
+    const strong = document.querySelector('#ytc-panel .ytc-info-red .ytc-info-strong');
+    const bar    = document.querySelector('#ytc-panel .ytc-progress-bar');
+    if (strong) strong.textContent = `${deleted} / ${total} deleted`;
+    if (bar)    bar.style.width    = `${Math.round((deleted / total) * 100)}%`;
   }
 
   function initStateIdle() {
@@ -986,7 +1047,7 @@
       }
     }
 
-    setState(STATE.SCANNING, { count: foundItems.length });
+    updateScanningCount(foundItems.length);
 
     const currentHeight = document.documentElement.scrollHeight;
     const newSameCount  = currentHeight === lastHeight ? sameSizeCount + 1 : 0;
@@ -1089,7 +1150,7 @@
               if (confirmBtn) confirmBtn.click();
 
               deletedCount++;
-              setState(STATE.DELETING, { deleted: deletedCount, total: foundItems.length });
+              updateDeletingProgress(deletedCount, foundItems.length);
               setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
             }, DIALOG_WAIT_MS);
           },
