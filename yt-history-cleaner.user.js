@@ -432,6 +432,8 @@
     const isDisabled    = currentState === STATE.SCANNING || currentState === STATE.DELETING;
     const startMs       = selectedStart ? selectedStart.getTime() : null;
     const endMs         = selectedEnd   ? selectedEnd.getTime()   : null;
+    const _now          = new Date();
+    const today         = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
 
     for (let i = firstDay - 1; i >= 0; i--) {
       const cell = document.createElement('div');
@@ -455,7 +457,9 @@
         cell.classList.add('selected-single');
       }
 
-      if (isDisabled) {
+      if (cellDate > today) {
+        cell.classList.add('future');
+      } else if (isDisabled) {
         cell.classList.add('cell-disabled');
       } else {
         cell.onclick = () => handleDateClick(cellDate);
@@ -478,6 +482,11 @@
       : !selectedEnd
         ? 'Click another date to set a range'
         : 'Click a date to start over';
+
+    const nextNavBtn = document.getElementById('ytc-cal-next');
+    if (nextNavBtn) {
+      nextNavBtn.disabled = (calendarYear === today.getFullYear() && calendarMonth === today.getMonth());
+    }
 
     updateCalendarSummary();
   }
