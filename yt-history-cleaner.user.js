@@ -462,6 +462,17 @@
     return date <= cutoff;
   }
 
+  function getCustomRange() {
+    return { start: selectedStart, end: selectedEnd };
+  }
+
+  function isSectionInCustomRange(headerText, range) {
+    const date = parseSectionDate(headerText);
+    if (!date) return false;
+    if (range.end === null) return date <= range.start;
+    return date >= range.start && date <= range.end;
+  }
+
   function handleScan() {
     if (currentState !== STATE.IDLE) return;
     foundItems   = [];
