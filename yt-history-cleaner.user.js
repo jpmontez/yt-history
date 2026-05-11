@@ -362,6 +362,120 @@
     return cal;
   }
 
+  const CAL_MONTHS = [
+    'January','February','March','April','May','June',
+    'July','August','September','October','November','December',
+  ];
+
+  function updateCalendarSummary() {
+    const calEl = document.getElementById('ytc-calendar');
+    if (!calEl) return;
+
+    const existing = document.getElementById('ytc-cal-summary');
+    if (existing) existing.remove();
+    if (!selectedStart) return;
+
+    const summary = document.createElement('div');
+    summary.id = 'ytc-cal-summary';
+    summary.className = 'ytc-info ytc-info-blue';
+
+    let labelText, strongText;
+    if (!selectedEnd) {
+      const m   = CAL_MONTHS[selectedStart.getMonth()];
+      labelText  = `Older than ${m} ${selectedStart.getDate()}, ${selectedStart.getFullYear()}`;
+      strongText = '1 date selected';
+    } else {
+      const sm   = CAL_MONTHS[selectedStart.getMonth()];
+      const em   = CAL_MONTHS[selectedEnd.getMonth()];
+      const days = Math.round((selectedEnd - selectedStart) / 86400000) + 1;
+      labelText  = `${sm} ${selectedStart.getDate()} – ${em} ${selectedEnd.getDate()}, ${selectedEnd.getFullYear()}`;
+      strongText = `${days} days selected`;
+    }
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = labelText;
+    summary.appendChild(labelSpan);
+
+    const strong = document.createElement('strong');
+    strong.className = 'ytc-info-strong';
+    strong.textContent = strongText;
+    summary.appendChild(strong);
+
+    calEl.insertAdjacentElement('afterend', summary);
+  }
+
+  function renderCalendar() {
+    const monthLabel = document.getElementById('ytc-cal-month');
+    const grid       = document.getElementById('ytc-cal-grid');
+    const hint       = document.getElementById('ytc-cal-hint');
+    if (!monthLabel || !grid || !hint) return;
+
+    monthLabel.textContent = `${CAL_MONTHS[calendarMonth]} ${calendarYear}`;
+    grid.replaceChildren(); // clear previous cells safely
+
+    ['S','M','T','W','T','F','S'].forEach(d => {
+      const dh = document.createElement('div');
+      dh.className = 'ytc-cal-dh';
+      dh.textContent = d;
+      grid.appendChild(dh);
+    });
+
+    const firstDay      = new Date(calendarYear, calendarMonth, 1).getDay();
+    const daysInMonth   = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    const daysInPrevMon = new Date(calendarYear, calendarMonth, 0).getDate();
+    const isDisabled    = currentState === STATE.SCANNING || currentState === STATE.DELETING;
+    const startMs       = selectedStart ? selectedStart.getTime() : null;
+    const endMs         = selectedEnd   ? selectedEnd.getTime()   : null;
+
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const cell = document.createElement('div');
+      cell.className = 'ytc-cal-cell spillover';
+      cell.textContent = String(daysInPrevMon - i);
+      grid.appendChild(cell);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const cellDate = new Date(calendarYear, calendarMonth, day);
+      const cellMs   = cellDate.getTime();
+      const cell     = document.createElement('div');
+      cell.className = 'ytc-cal-cell';
+      cell.textContent = String(day);
+
+      if (startMs !== null && endMs !== null) {
+        if      (cellMs === startMs)                 cell.classList.add('range-start');
+        else if (cellMs === endMs)                   cell.classList.add('range-end');
+        else if (cellMs > startMs && cellMs < endMs) cell.classList.add('in-range');
+      } else if (startMs !== null && cellMs === startMs) {
+        cell.classList.add('selected-single');
+      }
+
+      if (isDisabled) {
+        cell.classList.add('cell-disabled');
+      } else {
+        cell.onclick = () => handleDateClick(cellDate);
+      }
+
+      grid.appendChild(cell);
+    }
+
+    const totalCells    = firstDay + daysInMonth;
+    const trailingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    for (let i = 1; i <= trailingCells; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'ytc-cal-cell spillover';
+      cell.textContent = String(i);
+      grid.appendChild(cell);
+    }
+
+    hint.textContent = !selectedStart
+      ? 'Select a date'
+      : !selectedEnd
+        ? 'Click another date to set a range'
+        : 'Click a date to start over';
+
+    updateCalendarSummary();
+  }
+
   function setState(newState, data = {}) {
     currentState = newState;
     renderState(newState, data);
