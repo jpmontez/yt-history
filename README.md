@@ -1,6 +1,6 @@
 # YT History Cleaner
 
-A userscript for [Tampermonkey](https://www.tampermonkey.net/) (or any compatible userscript manager) that adds a control panel to YouTube's Watch History page for bulk-deleting entries older than a chosen time range.
+A userscript for [Tampermonkey](https://www.tampermonkey.net/) (or any compatible userscript manager) that adds a control panel to YouTube's Watch History page for bulk-deleting entries older than a chosen time range, or within a specific date range.
 
 Works entirely through the YouTube UI — no API keys, no external dependencies, no login required beyond your normal YouTube session.
 
@@ -22,7 +22,7 @@ Works entirely through the YouTube UI — no API keys, no external dependencies,
 
 The panel appears in the sidebar on desktop, or above the video feed on mobile.
 
-1. **Choose a time range** from the dropdown (e.g. "1 month" = delete everything older than 30 days).
+1. **Choose a time range** from the dropdown (e.g. "1 month" = delete everything older than 30 days), or click the **📅** button to pick a specific date or date range (see [Custom Date Picker](#custom-date-picker) below).
 2. Click **Scan** — the script auto-scrolls the page to load all matching history entries into memory and shows a live count.
 
    <img src="docs/screenshots/idle.png" width="600" alt="Idle state — time range picker and Scan button">
@@ -54,11 +54,25 @@ Changing the dropdown after a scan resets the panel back to Idle, so you can re-
 
 ---
 
+## Custom Date Picker
+
+Click the **📅** button to the right of the dropdown to open the calendar widget.
+
+- **Single date:** Click one date — deletes everything older than that date (same semantics as the preset options, but with an exact cutoff you choose). The Scan button activates immediately.
+- **Date range:** Click a start date, then a second date — order doesn't matter, the earlier date always becomes the start. Everything within that window (inclusive) is queued for deletion. The summary updates to show the span and day count.
+- **Reset:** Clicking a third date resets the selection and starts over with that date as a new single selection.
+
+While the calendar is open the preset dropdown is disabled. Click **📅** again to close the calendar, re-enable the dropdown, and clear the selection.
+
+Use **‹** / **›** in the calendar header to navigate between months.
+
+---
+
 ## How It Works
 
 The script interacts entirely through the YouTube UI — the same clicks a user would make manually:
 
-1. **Scan phase:** Auto-scrolls the page to trigger YouTube's infinite scroll and load all history items into the DOM. Items are matched against section date headers ("Today", "Yesterday", day names, "Month Day") and collected if they fall within the selected range.
+1. **Scan phase:** Auto-scrolls the page to trigger YouTube's infinite scroll and load all history items into the DOM. Items are matched against section date headers ("Today", "Yesterday", day names, "Month Day") and collected if they fall within the selected range — either a preset cutoff or a custom date/date range.
 
 2. **Delete phase:** For each collected item, the script: scrolls it into view → fires hover events to reveal the "More actions" button → clicks it → waits for the context menu → clicks "Remove from watch history" → confirms the dialog. A configurable delay between steps (~500 ms) prevents overwhelming the page.
 
