@@ -50,8 +50,11 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
     width: 100%;
-    max-height: calc(100vh - 70px);
+    position: sticky;
+    top: 72px;
+    max-height: calc(100vh - 96px);
     overflow-y: auto;
+    z-index: 1;
   }
   #ytc-panel .ytc-title {
     font-size: 11px;
@@ -1193,7 +1196,7 @@
     if (beforeNode) {
       parent.insertBefore(panel, beforeNode);
     } else {
-      parent.appendChild(panel);
+      parent.insertBefore(panel, parent.firstChild);
     }
     initStateIdle();
   }
