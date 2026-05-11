@@ -182,7 +182,8 @@
   #ytc-panel .ytc-cal-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
+    row-gap: 2px;
+    column-gap: 0;
     text-align: center;
   }
   #ytc-panel .ytc-cal-dh {
@@ -210,19 +211,19 @@
   #ytc-panel .ytc-cal-cell.range-start {
     background: #1a73e8;
     color: #fff;
-    border-radius: 50% 0 0 50%;
+    border-radius: 4px 0 0 4px;
     font-weight: 600;
   }
   #ytc-panel .ytc-cal-cell.range-end {
     background: #1a73e8;
     color: #fff;
-    border-radius: 0 50% 50% 0;
+    border-radius: 0 4px 4px 0;
     font-weight: 600;
   }
   #ytc-panel .ytc-cal-cell.selected-single {
     background: #1a73e8;
     color: #fff;
-    border-radius: 50%;
+    border-radius: 4px;
     font-weight: 600;
   }
   #ytc-panel .ytc-cal-cell.cell-disabled {
