@@ -662,8 +662,11 @@
   }
 
   function initStateIdle() {
-    foundItems   = [];
-    deletedCount = 0;
+    foundItems    = [];
+    deletedCount  = 0;
+    calendarMode  = false;
+    selectedStart = null;
+    selectedEnd   = null;
     setState(STATE.IDLE);
   }
 
