@@ -477,9 +477,18 @@
     if (currentState !== STATE.IDLE) return;
     foundItems   = [];
     deletedCount = 0;
-    const cutoff = getCutoffDate();
+
+    let filterFn;
+    if (calendarMode) {
+      const range = getCustomRange();
+      filterFn = (headerText) => isSectionInCustomRange(headerText, range);
+    } else {
+      const cutoff = getCutoffDate();
+      filterFn = (headerText) => isSectionOlderThanCutoff(headerText, cutoff);
+    }
+
     setState(STATE.SCANNING, { count: 0 });
-    scrollAndCollect(cutoff, 0, 0);
+    scrollAndCollect(filterFn, 0, 0);
   }
 
   function scrollAndCollect(filterFn, sameSizeCount, lastHeight) {
