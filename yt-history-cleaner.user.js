@@ -476,6 +476,45 @@
     updateCalendarSummary();
   }
 
+  function handleMonthNav(delta) {
+    calendarMonth += delta;
+    if (calendarMonth < 0)  { calendarMonth = 11; calendarYear--; }
+    if (calendarMonth > 11) { calendarMonth = 0;  calendarYear++; }
+    renderCalendar();
+  }
+
+  function handleDateClick(date) {
+    if (!selectedStart) {
+      selectedStart = date;
+      selectedEnd   = null;
+    } else if (!selectedEnd) {
+      if (date.getTime() === selectedStart.getTime()) {
+        // Same date tapped again — reset
+        selectedStart = null;
+      } else if (date < selectedStart) {
+        // Clicked earlier date first — keep start always earlier
+        selectedEnd   = selectedStart;
+        selectedStart = date;
+      } else {
+        selectedEnd = date;
+      }
+    } else {
+      // Third click — start fresh with this date
+      selectedStart = date;
+      selectedEnd   = null;
+    }
+
+    if (currentState === STATE.READY) setState(STATE.IDLE);
+
+    renderCalendar();
+
+    // Keep Scan button in sync with selection
+    const actionBtn = document.getElementById('ytc-action');
+    if (actionBtn && currentState === STATE.IDLE) {
+      actionBtn.disabled = !selectedStart;
+    }
+  }
+
   function setState(newState, data = {}) {
     currentState = newState;
     renderState(newState, data);
