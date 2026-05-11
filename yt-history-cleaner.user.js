@@ -482,7 +482,7 @@
     scrollAndCollect(cutoff, 0, 0);
   }
 
-  function scrollAndCollect(cutoff, sameSizeCount, lastHeight) {
+  function scrollAndCollect(filterFn, sameSizeCount, lastHeight) {
     const sections = [];
     document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
       const h = sec.querySelector('ytd-item-section-header-renderer');
@@ -490,7 +490,7 @@
     });
 
     for (const sd of sections) {
-      if (!isSectionOlderThanCutoff(sd.text, cutoff)) continue;
+      if (!filterFn(sd.text)) continue;
       const contents = sd.el.querySelector('#contents') ||
                        (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
       if (!contents) continue;
@@ -529,7 +529,7 @@
     }
 
     window.scrollTo(0, currentHeight);
-    setTimeout(() => scrollAndCollect(cutoff, newSameCount, currentHeight), SCROLL_PAUSE_MS);
+    setTimeout(() => scrollAndCollect(filterFn, newSameCount, currentHeight), SCROLL_PAUSE_MS);
   }
 
   function onScanComplete() {
