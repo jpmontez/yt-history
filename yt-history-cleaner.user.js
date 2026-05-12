@@ -373,6 +373,7 @@
   }
   html[dark] #ytc-panel .ytc-btn:disabled {
     background: #444 !important;
+    color: #fff;
   }
   html[dark] #ytc-panel .ytc-info-blue {
     background: #1a3a6e;
@@ -435,6 +436,12 @@
   }
   html[dark] #ytc-panel .ytc-cal-clear:hover {
     color: #f28b82;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.range-start,
+  html[dark] #ytc-panel .ytc-cal-cell.range-end,
+  html[dark] #ytc-panel .ytc-cal-cell.selected-single {
+    background: #1a73e8;
+    color: #fff;
   }
 `;
 
