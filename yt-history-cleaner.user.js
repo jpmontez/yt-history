@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.3
+// @version      1.4
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/feed/history*
 // @match        *://youtube.com/feed/history*
@@ -339,6 +339,102 @@
     background: currentColor;
     transition: width 0.35s ease;
     min-width: 4px;
+  }
+  html[dark] #ytc-panel {
+    background: #212121;
+    border-color: #3d3d3d;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.4);
+  }
+  html[dark] #ytc-panel .ytc-title {
+    color: #f1f1f1;
+  }
+  html[dark] #ytc-panel .ytc-seg {
+    border-color: #3d3d3d;
+  }
+  html[dark] #ytc-panel .ytc-seg-btn {
+    background: #2d2d2d;
+    color: #aaa;
+    border-right-color: #3d3d3d;
+  }
+  html[dark] #ytc-panel .ytc-seg-btn.active {
+    background: #1557b0;
+    color: #fff;
+  }
+  html[dark] #ytc-panel .ytc-label {
+    color: #aaa;
+  }
+  html[dark] #ytc-panel .ytc-hint {
+    color: #666;
+  }
+  html[dark] #ytc-panel select {
+    background: #2d2d2d;
+    border-color: #3d3d3d;
+    color: #f1f1f1;
+  }
+  html[dark] #ytc-panel .ytc-btn:disabled {
+    background: #444 !important;
+  }
+  html[dark] #ytc-panel .ytc-info-blue {
+    background: #1a3a6e;
+    color: #8ab4f8;
+  }
+  html[dark] #ytc-panel .ytc-info-red {
+    background: #4a1a17;
+    color: #f28b82;
+  }
+  html[dark] #ytc-panel .ytc-info-green {
+    background: #1a3d26;
+    color: #81c995;
+  }
+  html[dark] #ytc-panel .ytc-progress-wrap {
+    background: rgba(255,255,255,0.12);
+  }
+  html[dark] #ytc-panel .ytc-calendar {
+    background: #1a1a1a;
+    border-color: #3d3d3d;
+  }
+  html[dark] #ytc-panel .ytc-cal-nav {
+    color: #aaa;
+  }
+  html[dark] #ytc-panel .ytc-cal-nav:hover:not(:disabled) {
+    color: #8ab4f8;
+  }
+  html[dark] #ytc-panel .ytc-cal-month {
+    color: #f1f1f1;
+  }
+  html[dark] #ytc-panel .ytc-cal-dh {
+    color: #666;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell {
+    color: #e8e8e8;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell:hover:not(.spillover):not(.future):not(.cell-disabled):not(.in-range):not(.range-start):not(.range-end):not(.selected-single) {
+    background: #333;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.spillover {
+    color: #555;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.future {
+    color: #555;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.in-range {
+    background: #1a3a6e;
+    color: #8ab4f8;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range) {
+    color: #8ab4f8;
+  }
+  html[dark] #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range)::after {
+    background: #8ab4f8;
+  }
+  html[dark] #ytc-panel .ytc-cal-hint {
+    color: #666;
+  }
+  html[dark] #ytc-panel .ytc-cal-clear {
+    color: #666;
+  }
+  html[dark] #ytc-panel .ytc-cal-clear:hover {
+    color: #f28b82;
   }
 `;
 
