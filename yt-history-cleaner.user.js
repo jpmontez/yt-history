@@ -1118,7 +1118,7 @@
 
   const SCROLL_PAUSE_MS = 800;
   const SCROLL_MAX_SAME = 2;
-  const DELETE_STEP_MS  = 350;
+  const DELETE_STEP_MS  = 200;
   const DIALOG_WAIT_MS  = 450;
   const DIALOG_TIMEOUT  = 1500;
 
@@ -1313,6 +1313,18 @@
     return null;
   }
 
+  async function waitForConfirmButton(timeout) {
+    const sel      = 'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button';
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (cancelRequested) return null;
+      const btn = document.querySelector(sel);
+      if (btn) return btn;
+      await sleep(20);
+    }
+    return null;
+  }
+
   async function deleteNext(items) {
     const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
 
@@ -1358,11 +1370,8 @@
       // find the actual clickable child element inside it
       const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
       clickTarget.click();
-      await sleep(DIALOG_WAIT_MS);
 
-      const confirmBtn = document.querySelector(
-        'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
-      );
+      const confirmBtn = await waitForConfirmButton(600);
       if (confirmBtn) confirmBtn.click();
 
       deletedCount++;
