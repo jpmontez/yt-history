@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.4
+// @version      1.5
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/feed/history*
 // @match        *://youtube.com/feed/history*
@@ -50,6 +50,7 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
     position: sticky;
+    top: 56px;
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     z-index: 1;
@@ -149,8 +150,13 @@
     color: #fff;
     cursor: not-allowed;
   }
-  #ytc-panel .ytc-btn-blue { background: #1a73e8; color: #fff; }
-  #ytc-panel .ytc-btn-red  { background: #d93025; color: #fff; }
+  #ytc-panel .ytc-btn-blue   { background: #1a73e8; color: #fff; }
+  #ytc-panel .ytc-btn-red    { background: #d93025; color: #fff; }
+  #ytc-panel .ytc-btn-cancel {
+    background: transparent;
+    color: #5f6368;
+    border: 1px solid #dadce0;
+  }
   #ytc-panel .ytc-info {
     border-radius: 6px;
     padding: 8px 10px;
@@ -374,6 +380,10 @@
     background: #444 !important;
     color: #fff;
   }
+  html[dark] #ytc-panel .ytc-btn-cancel {
+    color: #aaa;
+    border-color: #3d3d3d;
+  }
   html[dark] #ytc-panel .ytc-info-blue {
     background: #1a3a6e;
     color: #8ab4f8;
@@ -445,23 +455,26 @@
 `;
 
   const STATE = {
-    IDLE:     'idle',
-    SCANNING: 'scanning',
-    READY:    'ready',
-    DELETING: 'deleting',
-    DONE:     'done',
+    IDLE:      'idle',
+    SCANNING:  'scanning',
+    READY:     'ready',
+    DELETING:  'deleting',
+    DONE:      'done',
+    CANCELLED: 'cancelled',
   };
 
-  let currentState = STATE.IDLE;
-  let foundItems   = [];
-  let deletedCount = 0;
+  let currentState    = STATE.IDLE;
+  let foundItems      = new Set();
+  let deletedCount    = 0;
+  let skippedCount    = 0;
+  let cancelRequested = false;
 
   let calendarMode  = false;
   let calendarYear  = 0;
   let calendarMonth = 0;
-  let selectedStart = null; // Date | null — always the earlier of the two picked dates
-  let selectedEnd   = null; // Date | null — always the later of the two picked dates
-  let hoverDate     = null; // Date | null — preview end while awaiting 2nd click
+  let selectedStart = null;
+  let selectedEnd   = null;
+  let hoverDate     = null;
 
   const TIME_RANGES = [
     { label: '1 day',    days: 1   },
@@ -472,6 +485,33 @@
     { label: '6 months', days: 180 },
     { label: 'All time', days: null },
   ];
+
+  // Web Worker-based sleep so timers keep running in background tabs
+  let _timerWorker = null;
+  let _timerSeq    = 0;
+
+  function getTimerWorker() {
+    if (!_timerWorker) {
+      const src = 'self.onmessage=function(e){setTimeout(function(){self.postMessage(e.data[0]);},e.data[1]);};';
+      _timerWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+    }
+    return _timerWorker;
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => {
+      const id     = ++_timerSeq;
+      const worker = getTimerWorker();
+      const handler = e => {
+        if (e.data === id) {
+          worker.removeEventListener('message', handler);
+          resolve();
+        }
+      };
+      worker.addEventListener('message', handler);
+      worker.postMessage([id, ms]);
+    });
+  }
 
   function injectStyles() {
     if (!document.getElementById('ytc-font')) {
@@ -937,25 +977,45 @@
 
       case STATE.DELETING:
         if (rangeEl) rangeEl.disabled = true;
-        actionBtn.textContent = 'Deleting...';
-        actionBtn.className   = 'ytc-btn';
-        actionBtn.disabled    = true;
+        actionBtn.textContent = 'Cancel';
+        actionBtn.className   = 'ytc-btn ytc-btn-cancel';
+        actionBtn.disabled    = false;
+        actionBtn.onclick     = handleCancel;
         insertInfo(actionBtn, 'red', 'Deleting...', `0 / ${data.total} deleted`, 0);
         setSegButtonsDisabled(true);
         if (calendarMode) renderCalendar();
         break;
 
-      case STATE.DONE:
+      case STATE.DONE: {
         if (rangeEl) rangeEl.disabled = false;
         actionBtn.textContent = 'Scan Again';
         actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleReset;
-        insertInfo(actionBtn, 'green', `✓ Done! Deleted ${data.count} items`, null);
+        const doneLabel = data.skipped > 0
+          ? `✓ Done! ${data.count} deleted, ${data.skipped} skipped`
+          : `✓ Done! Deleted ${data.count} items`;
+        insertInfo(actionBtn, 'green', doneLabel, null);
         insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
         setSegButtonsDisabled(false);
         if (calendarMode) renderCalendar();
         break;
+      }
+
+      case STATE.CANCELLED: {
+        if (rangeEl) rangeEl.disabled = false;
+        actionBtn.textContent = 'Scan Again';
+        actionBtn.className   = 'ytc-btn ytc-btn-blue';
+        actionBtn.disabled    = false;
+        actionBtn.onclick     = handleReset;
+        const cancelLabel = data.deleted > 0
+          ? `Cancelled — ${data.deleted} deleted`
+          : 'Cancelled';
+        insertInfo(actionBtn, 'blue', cancelLabel, data.skipped > 0 ? `${data.skipped} skipped` : null);
+        setSegButtonsDisabled(false);
+        if (calendarMode) renderCalendar();
+        break;
+      }
     }
   }
 
@@ -1005,20 +1065,26 @@
     if (strong) strong.textContent = `Found ${count} items`;
   }
 
-  function updateDeletingProgress(deleted, total) {
+  function updateDeletingProgress(deleted, total, skipped) {
     const strong = document.querySelector('#ytc-panel .ytc-info-red .ytc-info-strong');
     const bar    = document.querySelector('#ytc-panel .ytc-progress-bar');
-    if (strong) strong.textContent = `${deleted} / ${total} deleted`;
-    if (bar)    bar.style.width    = `${Math.round((deleted / total) * 100)}%`;
+    if (strong) {
+      strong.textContent = skipped > 0
+        ? `${deleted} deleted, ${skipped} skipped / ${total}`
+        : `${deleted} / ${total} deleted`;
+    }
+    if (bar) bar.style.width = `${Math.round((deleted / total) * 100)}%`;
   }
 
   function initStateIdle() {
-    foundItems    = [];
-    deletedCount  = 0;
-    calendarMode  = false;
-    selectedStart = null;
-    selectedEnd   = null;
-    hoverDate     = null;
+    foundItems      = new Set();
+    deletedCount    = 0;
+    skippedCount    = 0;
+    cancelRequested = false;
+    calendarMode    = false;
+    selectedStart   = null;
+    selectedEnd     = null;
+    hoverDate       = null;
     setState(STATE.IDLE);
     // Ensure segmented control reflects Quick mode
     const quickBtn  = document.getElementById('ytc-seg-quick');
@@ -1105,8 +1171,9 @@
 
   function handleScan() {
     if (currentState !== STATE.IDLE) return;
-    foundItems   = [];
-    deletedCount = 0;
+    foundItems      = new Set();
+    deletedCount    = 0;
+    cancelRequested = false;
 
     let filterFn;
     if (calendarMode) {
@@ -1118,61 +1185,58 @@
     }
 
     setState(STATE.SCANNING, { count: 0 });
-    scrollAndCollect(filterFn, 0, 0);
+    scrollAndCollect(filterFn);
   }
 
-  function scrollAndCollect(filterFn, sameSizeCount, lastHeight) {
-    const sections = [];
-    document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
-      const h = sec.querySelector('ytd-item-section-header-renderer');
-      if (h) sections.push({ el: sec, text: h.textContent.trim() });
-    });
+  async function scrollAndCollect(filterFn) {
+    let sameSizeCount = 0;
+    let lastHeight    = 0;
 
-    for (const sd of sections) {
-      if (!filterFn(sd.text)) continue;
-      const contents = sd.el.querySelector('#contents') ||
-                       (sd.el.shadowRoot && sd.el.shadowRoot.querySelector('#contents'));
-      if (!contents) continue;
-      for (const child of contents.children) {
-        if (child.tagName === 'YTD-REEL-SHELF-RENDERER') {
-          // Shorts shelf — collect individual reel items inside it
-          const reelItems = [...child.querySelectorAll('ytd-reel-item-renderer')];
-          if (reelItems.length > 0) {
-            for (const ri of reelItems) {
-              if (!foundItems.includes(ri)) foundItems.push(ri);
+    while (true) {
+      document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
+        const h = sec.querySelector('ytd-item-section-header-renderer');
+        if (!h || !filterFn(h.textContent.trim())) return;
+        const contents = sec.querySelector('#contents') ||
+                         (sec.shadowRoot && sec.shadowRoot.querySelector('#contents'));
+        if (!contents) return;
+        for (const child of contents.children) {
+          if (child.tagName === 'YTD-REEL-SHELF-RENDERER') {
+            const reelItems = [...child.querySelectorAll('ytd-reel-item-renderer')];
+            if (reelItems.length > 0) {
+              reelItems.forEach(ri => foundItems.add(ri));
+            } else {
+              const shelfItems = child.querySelector('#items');
+              if (shelfItems) {
+                [...shelfItems.children].forEach(ri => foundItems.add(ri));
+              } else {
+                foundItems.add(child);
+              }
             }
           } else {
-            const shelfItems = child.querySelector('#items');
-            if (shelfItems) {
-              for (const ri of shelfItems.children) {
-                if (!foundItems.includes(ri)) foundItems.push(ri);
-              }
-            } else {
-              if (!foundItems.includes(child)) foundItems.push(child);
-            }
+            foundItems.add(child);
           }
-        } else {
-          if (!foundItems.includes(child)) foundItems.push(child);
         }
-      }
+      });
+
+      updateScanningCount(foundItems.size);
+
+      const currentHeight = document.documentElement.scrollHeight;
+      sameSizeCount = currentHeight === lastHeight ? sameSizeCount + 1 : 0;
+      lastHeight = currentHeight;
+
+      if (sameSizeCount >= SCROLL_MAX_SAME) break;
+
+      window.scrollTo(0, currentHeight);
+      await sleep(SCROLL_PAUSE_MS);
     }
 
-    updateScanningCount(foundItems.length);
-
-    const currentHeight = document.documentElement.scrollHeight;
-    const newSameCount  = currentHeight === lastHeight ? sameSizeCount + 1 : 0;
-
-    if (newSameCount >= SCROLL_MAX_SAME) {
-      onScanComplete();
-      return;
-    }
-
-    window.scrollTo(0, currentHeight);
-    setTimeout(() => scrollAndCollect(filterFn, newSameCount, currentHeight), SCROLL_PAUSE_MS);
+    onScanComplete();
   }
 
   function onScanComplete() {
-    if (foundItems.length === 0) {
+    document.getElementById('ytc-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (foundItems.size === 0) {
       setState(STATE.IDLE);
       const panel     = document.getElementById('ytc-panel');
       const actionBtn = document.getElementById('ytc-action');
@@ -1183,92 +1247,114 @@
       setTimeout(() => msg.remove(), 3000);
       return;
     }
-    setState(STATE.READY, { count: foundItems.length });
+    setState(STATE.READY, { count: foundItems.size });
   }
 
   function handleDelete() {
     if (currentState !== STATE.READY) return;
-    deletedCount = 0;
-    setState(STATE.DELETING, { deleted: 0, total: foundItems.length });
-    deleteNext(0);
+    deletedCount    = 0;
+    skippedCount    = 0;
+    cancelRequested = false;
+    const items = [...foundItems];
+    setState(STATE.DELETING, { deleted: 0, total: items.length });
+    deleteNext(items);
   }
 
-  function deleteNext(index) {
-    if (index >= foundItems.length) {
-      setState(STATE.DONE, { count: deletedCount });
-      return;
-    }
+  async function deleteNext(items) {
+    const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
 
-    const item = foundItems[index];
-    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    for (let i = 0; i < items.length; i++) {
+      if (cancelRequested) {
+        setState(STATE.CANCELLED, { deleted: deletedCount, skipped: skippedCount });
+        return;
+      }
 
-    setTimeout(() => {
+      const item = items[i];
+      item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(DELETE_STEP_MS);
+
       // Hover to reveal per-item controls
       item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-      item.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
+      await sleep(300);
 
-      setTimeout(() => {
-        // Polymer's querySelector returns the section's button, not the item's.
-        // Use spatial matching: find a "More actions" button whose center falls
-        // within this item's bounding rect.
-        const itemRect = item.getBoundingClientRect();
-        const allButtons = document.querySelectorAll('button[aria-label]');
-        let menuBtn = null;
-        for (const btn of allButtons) {
-          const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-          if (!label.includes('action') && !label.includes('more')) continue;
-          const r = btn.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) continue;
-          const cx = r.left + r.width / 2;
-          const cy = r.top + r.height / 2;
-          if (cx >= itemRect.left && cx <= itemRect.right &&
-              cy >= itemRect.top  && cy <= itemRect.bottom) {
-            menuBtn = btn;
-            break;
-          }
+      // Spatial matching: find a "More actions" button whose center falls
+      // within this item's bounding rect (Polymer's querySelector returns
+      // the section's button, not the item's)
+      const itemRect   = item.getBoundingClientRect();
+      const allButtons = document.querySelectorAll('button[aria-label]');
+      let menuBtn = null;
+      for (const btn of allButtons) {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (!label.includes('action') && !label.includes('more')) continue;
+        const r = btn.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        const cx = r.left + r.width / 2;
+        const cy = r.top  + r.height / 2;
+        if (cx >= itemRect.left && cx <= itemRect.right &&
+            cy >= itemRect.top  && cy <= itemRect.bottom) {
+          menuBtn = btn;
+          break;
         }
+      }
 
-        if (!menuBtn) {
-          deleteNext(index + 1);
-          return;
-        }
+      if (!menuBtn) {
+        skippedCount++;
+        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        continue;
+      }
 
-        menuBtn.click();
+      menuBtn.click();
 
-        const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
-        waitForElement(
-          menuItemSel,
-          () => {
-            const removeBtn = [...document.querySelectorAll(menuItemSel)]
-              .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+      const removeBtn = await waitForMenuOption(menuItemSel, DIALOG_TIMEOUT);
 
-            if (!removeBtn) {
-              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-              setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
-              return;
-            }
+      if (!removeBtn) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        skippedCount++;
+        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        await sleep(DELETE_STEP_MS);
+        continue;
+      }
 
-            // yt-list-item-view-model doesn't handle click directly —
-            // find the actual clickable child element inside it
-            const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
-            clickTarget.click();
+      // yt-list-item-view-model doesn't handle click directly —
+      // find the actual clickable child element inside it
+      const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
+      clickTarget.click();
+      await sleep(DIALOG_WAIT_MS);
 
-            setTimeout(() => {
-              const confirmBtn = document.querySelector(
-                'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
-              );
-              if (confirmBtn) confirmBtn.click();
+      const confirmBtn = document.querySelector(
+        'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button'
+      );
+      if (confirmBtn) confirmBtn.click();
 
-              deletedCount++;
-              updateDeletingProgress(deletedCount, foundItems.length);
-              setTimeout(() => deleteNext(index + 1), DELETE_STEP_MS);
-            }, DIALOG_WAIT_MS);
-          },
-          100,
-          DIALOG_TIMEOUT
-        );
-      }, 300); // wait for hover to reveal per-item controls
-    }, DELETE_STEP_MS);
+      deletedCount++;
+      updateDeletingProgress(deletedCount, items.length, skippedCount);
+      await sleep(DELETE_STEP_MS);
+    }
+
+    setState(STATE.DONE, { count: deletedCount, skipped: skippedCount });
+  }
+
+  async function waitForMenuOption(menuItemSel, timeout) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (document.querySelector(menuItemSel)) {
+        return [...document.querySelectorAll(menuItemSel)]
+          .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+      }
+      await sleep(100);
+    }
+    return null;
+  }
+
+  function handleCancel() {
+    if (currentState !== STATE.DELETING) return;
+    cancelRequested = true;
+    const actionBtn = document.getElementById('ytc-action');
+    if (actionBtn) {
+      actionBtn.disabled    = true;
+      actionBtn.textContent = 'Cancelling…';
+    }
   }
 
   function handleReset() {
