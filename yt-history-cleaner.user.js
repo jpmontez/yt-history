@@ -463,6 +463,7 @@
   let deletedCount    = 0;
   let skippedCount    = 0;
   let cancelRequested = false;
+  let _navAbortFn     = null;
 
   let calendarMode  = false;
   let calendarYear  = 0;
@@ -1270,11 +1271,20 @@
     setState(STATE.READY, { count: foundItems.size });
   }
 
+  function removeNavAbort() {
+    if (_navAbortFn) {
+      window.removeEventListener('yt-navigate-finish', _navAbortFn);
+      _navAbortFn = null;
+    }
+  }
+
   function handleDelete() {
     if (currentState !== STATE.READY) return;
     deletedCount    = 0;
     skippedCount    = 0;
     cancelRequested = false;
+    _navAbortFn = () => { cancelRequested = true; };
+    window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
     const items = [...foundItems];
     setState(STATE.DELETING, { deleted: 0, total: items.length });
     deleteNext(items);
@@ -1284,7 +1294,13 @@
     const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
 
     for (let i = 0; i < items.length; i++) {
+      if (!document.contains(items[i])) {
+        skippedCount++;
+        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        continue;
+      }
       if (cancelRequested) {
+        removeNavAbort();
         setState(STATE.CANCELLED, { deleted: deletedCount, skipped: skippedCount });
         return;
       }
@@ -1352,6 +1368,7 @@
       await sleep(DELETE_STEP_MS);
     }
 
+    removeNavAbort();
     setState(STATE.DONE, { count: deletedCount, skipped: skippedCount });
   }
 
