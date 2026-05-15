@@ -1194,19 +1194,21 @@
     cancelRequested = false;
 
     let filterFn;
+    let pauseMs = SCROLL_PAUSE_MS;
     if (calendarMode) {
       const range = getCustomRange();
       filterFn = (headerText) => isSectionInCustomRange(headerText, range);
     } else {
       const cutoff = getCutoffDate();
       filterFn = (headerText) => isSectionOlderThanCutoff(headerText, cutoff);
+      if (cutoff === null) pauseMs = 200;
     }
 
     setState(STATE.SCANNING, { count: 0 });
-    scrollAndCollect(filterFn);
+    scrollAndCollect(filterFn, pauseMs);
   }
 
-  async function scrollAndCollect(filterFn) {
+  async function scrollAndCollect(filterFn, pauseMs = SCROLL_PAUSE_MS) {
     let sameSizeCount = 0;
     let lastHeight    = 0;
 
@@ -1245,7 +1247,7 @@
       if (sameSizeCount >= SCROLL_MAX_SAME) break;
 
       window.scrollTo(0, currentHeight);
-      await sleep(SCROLL_PAUSE_MS);
+      await sleep(pauseMs);
     }
 
     onScanComplete();
