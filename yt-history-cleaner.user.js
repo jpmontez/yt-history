@@ -1015,7 +1015,7 @@
           ? `✓ Done! ${data.count} deleted, ${data.skipped} skipped`
           : `✓ Done! Deleted ${data.count} items`;
         insertInfo(actionBtn, 'green', doneLabel, null);
-        insertHint(actionBtn, 'Refresh the page for changes to be reflected.');
+        insertRefreshButton(actionBtn);
         setSegButtonsDisabled(false);
         if (calendarMode) renderCalendar();
         break;
@@ -1077,6 +1077,16 @@
     div.className   = 'ytc-hint';
     div.textContent = text;
     panel.insertBefore(div, beforeNode);
+  }
+
+  function insertRefreshButton(beforeNode) {
+    const panel = document.getElementById('ytc-panel');
+    const btn   = document.createElement('button');
+    btn.className      = 'ytc-btn ytc-btn-cancel';
+    btn.textContent    = 'Refresh Page';
+    btn.style.marginBottom = '8px';
+    btn.onclick = () => window.location.reload();
+    panel.insertBefore(btn, beforeNode);
   }
 
   function updateScanningCount(count) {
