@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.6
+// @version      1.7
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -26,17 +26,35 @@
   }
 
   function init() {
-    if (window.location.pathname === '/feed/history') {
-      injectPanel();
-    }
-
-    window.addEventListener('yt-navigate-finish', () => {
-      const existing = document.getElementById('ytc-panel');
-      if (existing) existing.remove();
-      if (window.location.pathname === '/feed/history') {
+    const handleNav = () => {
+      const onHistory = window.location.pathname === '/feed/history';
+      const existing  = document.getElementById('ytc-panel');
+      if (!onHistory && existing) {
+        existing.remove();
+      } else if (onHistory && !existing) {
         injectPanel();
       }
-    });
+    };
+
+    handleNav();
+
+    // Listen on both document and window — YT dispatches custom events on
+    // document.documentElement, which bubble to both, but some pages/extensions
+    // can interfere with one or the other.
+    document.addEventListener('yt-navigate-finish',   handleNav);
+    document.addEventListener('yt-page-data-updated', handleNav);
+    window.addEventListener('yt-navigate-finish',     handleNav);
+    window.addEventListener('yt-page-data-updated',   handleNav);
+
+    // Fallback: detect SPA URL changes via MutationObserver in case YT events
+    // don't fire as expected for this transition.
+    let lastUrl = location.href;
+    new MutationObserver(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        handleNav();
+      }
+    }).observe(document, { subtree: true, childList: true });
   }
 
   const STYLES = `
@@ -1445,13 +1463,21 @@
   function injectPanel() {
     const isMobile = window.innerWidth < 1014;
 
+    // Wait for the history page itself to mount — #secondary alone exists on
+    // many YT pages, so without this guard we can inject into a stale sidebar
+    // that YouTube then replaces during the SPA transition.
+    const historyPageSel = 'ytd-browse[page-subtype="history"]';
+
     if (isMobile) {
-      waitForElement('ytd-browse-filter-chip-bar-renderer, #secondary', (el) => {
-        appendPanel(el.parentElement || el, el.nextSibling);
+      waitForElement(historyPageSel, () => {
+        const el = document.querySelector('ytd-browse-filter-chip-bar-renderer, #secondary');
+        if (el) appendPanel(el.parentElement || el, el.nextSibling);
       });
     } else {
-      waitForElement('#secondary', (sidebar) => {
-        appendPanel(sidebar, null);
+      waitForElement(historyPageSel, () => {
+        const sidebar = document.querySelector('ytd-browse[page-subtype="history"] #secondary') ||
+                        document.querySelector('#secondary');
+        if (sidebar) appendPanel(sidebar, null);
       });
     }
   }
