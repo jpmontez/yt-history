@@ -3,8 +3,8 @@
 // @namespace    https://github.com/jmontez
 // @version      1.6
 // @description  Bulk-delete YouTube watch history by time range
-// @match        *://www.youtube.com/feed/history*
-// @match        *://youtube.com/feed/history*
+// @match        *://www.youtube.com/*
+// @match        *://youtube.com/*
 // @grant        none
 // ==/UserScript==
 
