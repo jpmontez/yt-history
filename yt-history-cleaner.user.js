@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.5
+// @version      1.6
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/feed/history*
 // @match        *://youtube.com/feed/history*
@@ -458,12 +458,13 @@
     CANCELLED: 'cancelled',
   };
 
-  let currentState    = STATE.IDLE;
-  let foundItems      = new Set();
-  let deletedCount    = 0;
-  let skippedCount    = 0;
-  let cancelRequested = false;
-  let _navAbortFn     = null;
+  let currentState      = STATE.IDLE;
+  let foundItems        = new Set();
+  let deletedCount      = 0;
+  let skippedCount      = 0;
+  let cancelRequested   = false;
+  let _navAbortFn       = null;
+  let deletionStartTime = 0;
 
   let calendarMode  = false;
   let calendarYear  = 0;
@@ -994,16 +995,24 @@
         if (calendarMode) renderCalendar();
         break;
 
-      case STATE.DELETING:
+      case STATE.DELETING: {
         if (rangeEl) rangeEl.disabled = true;
         actionBtn.textContent = 'Cancel';
         actionBtn.className   = 'ytc-btn ytc-btn-cancel';
         actionBtn.disabled    = false;
         actionBtn.onclick     = handleCancel;
         insertInfo(actionBtn, 'red', 'Deleting...', `0 / ${data.total} deleted`, 0);
+        const infoBox = document.querySelector('#ytc-panel .ytc-info-red');
+        if (infoBox) {
+          const eta = document.createElement('span');
+          eta.id = 'ytc-eta';
+          eta.style.cssText = 'display:block;font-size:11px;opacity:0.75;margin-top:3px;';
+          infoBox.appendChild(eta);
+        }
         setSegButtonsDisabled(true);
         if (calendarMode) renderCalendar();
         break;
+      }
 
       case STATE.DONE: {
         if (rangeEl) rangeEl.disabled = false;
@@ -1097,12 +1106,20 @@
   function updateDeletingProgress(deleted, total, skipped) {
     const strong = document.querySelector('#ytc-panel .ytc-info-red .ytc-info-strong');
     const bar    = document.querySelector('#ytc-panel .ytc-progress-bar');
+    const eta    = document.getElementById('ytc-eta');
     if (strong) {
       strong.textContent = skipped > 0
         ? `${deleted} deleted, ${skipped} skipped / ${total}`
         : `${deleted} / ${total} deleted`;
     }
     if (bar) bar.style.width = `${Math.round((deleted / total) * 100)}%`;
+    if (eta && deleted > 0 && deleted < total) {
+      const avgMs  = (Date.now() - deletionStartTime) / deleted;
+      const remSec = Math.round(avgMs * (total - deleted) / 1000);
+      eta.textContent = remSec >= 90
+        ? `~${Math.round(remSec / 60)}m remaining`
+        : `~${remSec}s remaining`;
+    }
   }
 
   function initStateIdle() {
@@ -1290,10 +1307,11 @@
 
   function handleDelete() {
     if (currentState !== STATE.READY) return;
-    deletedCount    = 0;
-    skippedCount    = 0;
-    cancelRequested = false;
-    _navAbortFn = () => { cancelRequested = true; };
+    deletedCount      = 0;
+    skippedCount      = 0;
+    cancelRequested   = false;
+    _navAbortFn       = () => { cancelRequested = true; };
+    deletionStartTime = Date.now();
     window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
     const items = [...foundItems];
     setState(STATE.DELETING, { deleted: 0, total: items.length });
