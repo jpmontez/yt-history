@@ -27,8 +27,8 @@ The panel appears in the sidebar on desktop, or above the video feed on mobile.
    - **Custom Date:** Use the calendar picker to select an exact date or date range (see [Custom Date Picker](#custom-date-picker) below).
 2. Click **Scan** — the script auto-scrolls the page to load all matching history entries into memory and shows a live count.
 3. Once scanning is complete, click **Delete N items** to begin deletion.
-4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A progress bar tracks completion.
-5. When finished, a green confirmation shows how many items were deleted. **Refresh the page** to see the changes reflected.
+4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A progress bar and live ETA track completion.
+5. When finished, a green confirmation shows how many items were deleted. Click **Refresh Page** to reload and see the changes.
 
 ---
 
