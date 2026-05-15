@@ -54,10 +54,6 @@
     overflow-y: auto;
     z-index: 1;
   }
-  #ytc-panel + * {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-  }
   #ytc-panel .ytc-title {
     font-size: 11px;
     font-weight: 700;
@@ -485,30 +481,53 @@
     { label: 'All time', days: null },
   ];
 
-  // Web Worker-based sleep so timers keep running in background tabs
+  // Web Worker-based sleep so timers keep running in background tabs.
+  // Falls back to setTimeout if the worker can't be created (e.g., CSP).
   let _timerWorker = null;
+  let _workerFailed = false;
   let _timerSeq    = 0;
 
   function getTimerWorker() {
-    if (!_timerWorker) {
+    if (_workerFailed) return null;
+    if (_timerWorker)  return _timerWorker;
+    try {
       const src = 'self.onmessage=function(e){setTimeout(function(){self.postMessage(e.data[0]);},e.data[1]);};';
-      _timerWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+      const w = new Worker(url);
+      w.addEventListener('error', () => { _workerFailed = true; _timerWorker = null; });
+      _timerWorker = w;
+      return w;
+    } catch (err) {
+      _workerFailed = true;
+      return null;
     }
-    return _timerWorker;
   }
 
   function sleep(ms) {
     return new Promise(resolve => {
-      const id     = ++_timerSeq;
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+
+      // Always-on backup: setTimeout guarantees the promise resolves
+      // even if the worker is dead, throttled, or silently blocked.
+      setTimeout(finish, ms);
+
       const worker = getTimerWorker();
+      if (!worker) return;
+
+      const id = ++_timerSeq;
       const handler = e => {
         if (e.data === id) {
           worker.removeEventListener('message', handler);
-          resolve();
+          finish();
         }
       };
       worker.addEventListener('message', handler);
-      worker.postMessage([id, ms]);
+      try {
+        worker.postMessage([id, ms]);
+      } catch (err) {
+        worker.removeEventListener('message', handler);
+      }
     });
   }
 
