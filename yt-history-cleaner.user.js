@@ -50,7 +50,6 @@
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     box-sizing: border-box;
     position: sticky;
-    top: 56px;
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     z-index: 1;
