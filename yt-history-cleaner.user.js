@@ -1146,7 +1146,6 @@
   const SCROLL_PAUSE_MS = 800;
   const SCROLL_MAX_SAME = 2;
   const DELETE_STEP_MS  = 200;
-  const DIALOG_WAIT_MS  = 450;
   const DIALOG_TIMEOUT  = 1500;
 
   function getCutoffDate() {
@@ -1414,6 +1413,7 @@
   async function waitForMenuOption(menuItemSel, timeout) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
+      if (cancelRequested) return null;
       if (document.querySelector(menuItemSel)) {
         return [...document.querySelectorAll(menuItemSel)]
           .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
