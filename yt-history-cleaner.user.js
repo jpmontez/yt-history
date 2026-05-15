@@ -1115,11 +1115,11 @@
     if (customSection) customSection.style.display = 'none';
   }
 
-  const SCROLL_PAUSE_MS = 1200;
-  const SCROLL_MAX_SAME = 3;
-  const DELETE_STEP_MS  = 500;
-  const DIALOG_WAIT_MS  = 800;
-  const DIALOG_TIMEOUT  = 3000;
+  const SCROLL_PAUSE_MS = 800;
+  const SCROLL_MAX_SAME = 2;
+  const DELETE_STEP_MS  = 350;
+  const DIALOG_WAIT_MS  = 450;
+  const DIALOG_TIMEOUT  = 1500;
 
   function getCutoffDate() {
     const rangeEl = document.getElementById('ytc-range');
@@ -1252,7 +1252,7 @@
   }
 
   function onScanComplete() {
-    document.getElementById('ytc-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('ytc-panel')?.scrollIntoView({ behavior: 'instant', block: 'start' });
 
     if (foundItems.size === 0) {
       setState(STATE.IDLE);
@@ -1288,13 +1288,13 @@
       }
 
       const item = items[i];
-      item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      item.scrollIntoView({ behavior: 'instant', block: 'center' });
       await sleep(DELETE_STEP_MS);
 
       // Hover to reveal per-item controls
       item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
       item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
-      await sleep(300);
+      await sleep(150);
 
       // Spatial matching: find a "More actions" button whose center falls
       // within this item's bounding rect (Polymer's querySelector returns
