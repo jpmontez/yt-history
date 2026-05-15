@@ -1290,6 +1290,29 @@
     deleteNext(items);
   }
 
+  async function waitForMenuButton(item, timeout) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (cancelRequested) return null;
+      const itemRect   = item.getBoundingClientRect();
+      const allButtons = document.querySelectorAll('button[aria-label]');
+      for (const btn of allButtons) {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (!label.includes('action') && !label.includes('more')) continue;
+        const r = btn.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        const cx = r.left + r.width / 2;
+        const cy = r.top  + r.height / 2;
+        if (cx >= itemRect.left && cx <= itemRect.right &&
+            cy >= itemRect.top  && cy <= itemRect.bottom) {
+          return btn;
+        }
+      }
+      await sleep(20);
+    }
+    return null;
+  }
+
   async function deleteNext(items) {
     const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
 
@@ -1309,30 +1332,9 @@
       item.scrollIntoView({ behavior: 'instant', block: 'center' });
       await sleep(DELETE_STEP_MS);
 
-      // Hover to reveal per-item controls
       item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
       item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
-      await sleep(150);
-
-      // Spatial matching: find a "More actions" button whose center falls
-      // within this item's bounding rect (Polymer's querySelector returns
-      // the section's button, not the item's)
-      const itemRect   = item.getBoundingClientRect();
-      const allButtons = document.querySelectorAll('button[aria-label]');
-      let menuBtn = null;
-      for (const btn of allButtons) {
-        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (!label.includes('action') && !label.includes('more')) continue;
-        const r = btn.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) continue;
-        const cx = r.left + r.width / 2;
-        const cy = r.top  + r.height / 2;
-        if (cx >= itemRect.left && cx <= itemRect.right &&
-            cy >= itemRect.top  && cy <= itemRect.bottom) {
-          menuBtn = btn;
-          break;
-        }
-      }
+      const menuBtn = await waitForMenuButton(item, 300);
 
       if (!menuBtn) {
         skippedCount++;
