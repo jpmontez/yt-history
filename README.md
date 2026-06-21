@@ -37,6 +37,7 @@ The panel appears in the sidebar on desktop, or above the video feed on mobile.
 | Option   | Deletes history older than |
 |----------|---------------------------|
 | 1 day    | 24 hours ago              |
+| 3 days   | 72 hours ago              |
 | 1 week   | 7 days ago                |
 | 2 weeks  | 14 days ago               |
 | 1 month  | 30 days ago               |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.7
+// @version      1.8
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -493,6 +493,7 @@
 
   const TIME_RANGES = [
     { label: '1 day',    days: 1   },
+    { label: '3 days',   days: 3   },
     { label: '1 week',   days: 7   },
     { label: '2 weeks',  days: 14  },
     { label: '1 month',  days: 30  },
