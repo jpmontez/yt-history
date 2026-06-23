@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.10
+// @version      1.12
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -1337,7 +1337,7 @@
   }
 
   function onScanComplete() {
-    document.getElementById('ytc-panel')?.scrollIntoView({ behavior: 'instant', block: 'start' });
+    document.getElementById('ytc-panel')?.scrollIntoView({ block: 'start' });
     releaseWakeLock();
 
     if (foundItems.size === 0) {
@@ -1380,39 +1380,48 @@
     return label.includes('action') || label.includes('more');
   };
 
+  // Expensive: scans every aria-label button on the page and measures each
+  // box. Every getBoundingClientRect forces a layout reflow, so on a 1000+
+  // item feed this is the most CPU-hungry call in the script. It runs at most
+  // once per item — only when the cheap scoped lookup below fails entirely.
+  function findMenuButtonByGeometry(item) {
+    const itemRect = item.getBoundingClientRect();
+    for (const btn of document.querySelectorAll('button[aria-label]')) {
+      if (!isMenuButton(btn)) continue;
+      const r = btn.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;
+      const cx = r.left + r.width / 2;
+      const cy = r.top  + r.height / 2;
+      if (cx >= itemRect.left && cx <= itemRect.right &&
+          cy >= itemRect.top  && cy <= itemRect.bottom) {
+        return btn;
+      }
+    }
+    return null;
+  }
+
   async function waitForMenuButton(item, timeout) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
 
-      // Fast path: the action button is almost always a descendant of the
-      // item. Scoping the query to the item's subtree avoids scanning every
-      // button on the (huge, 1000+ item) page and the per-button
-      // getBoundingClientRect layout reflow that pegs the CPU.
+      // Fast path: the action button is a descendant of the item. Match by
+      // aria-label only — no getBoundingClientRect — so the poll loop never
+      // forces a layout reflow. YouTube renders this button at zero size until
+      // the row is hovered, but a programmatic .click() fires regardless of
+      // visibility, so we must NOT gate on its measured box (doing so would
+      // make every poll fall through to the costly global scan below).
       for (const btn of item.querySelectorAll('button[aria-label]')) {
-        if (!isMenuButton(btn)) continue;
-        const r = btn.getBoundingClientRect();
-        if (r.width > 0 || r.height > 0) return btn;
+        if (isMenuButton(btn)) return btn;
       }
 
-      // Fallback: handles renderers that host the action button outside the
-      // item subtree (e.g. an overlay). Only reached when the scoped lookup
-      // above finds nothing, so the costly global scan stays off the hot path.
-      const itemRect = item.getBoundingClientRect();
-      for (const btn of document.querySelectorAll('button[aria-label]')) {
-        if (!isMenuButton(btn)) continue;
-        const r = btn.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) continue;
-        const cx = r.left + r.width / 2;
-        const cy = r.top  + r.height / 2;
-        if (cx >= itemRect.left && cx <= itemRect.right &&
-            cy >= itemRect.top  && cy <= itemRect.bottom) {
-          return btn;
-        }
-      }
-      await sleep(20);
+      await sleep(30);
     }
-    return null;
+
+    // Scoped lookup timed out (rare: e.g. a renderer that hosts the button in
+    // an overlay outside the item subtree). Run the costly geometric scan
+    // exactly once here as a last resort, never on the per-poll hot path.
+    return cancelRequested ? null : findMenuButtonByGeometry(item);
   }
 
   async function waitForConfirmButton(timeout) {
@@ -1425,6 +1434,28 @@
       await sleep(20);
     }
     return null;
+  }
+
+  // Bring a row into the viewport before interacting with it. item.scrollIntoView
+  // ({behavior:'instant'}) is unreliable in Safari and silently no-ops there,
+  // which left every row below the fold off-screen — YouTube never renders an
+  // off-screen row's hover menu, so those deletions were all skipped. We scroll
+  // with window.scrollTo (proven reliable during the scan), then verify the row
+  // actually landed in view and retry before giving up.
+  async function scrollItemIntoView(item) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const rect   = item.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      if (center >= 0 && center <= window.innerHeight) {
+        if (attempt === 0) await sleep(DELETE_STEP_MS); // settle on first pass
+        return true;
+      }
+      const absoluteTop = rect.top + window.scrollY;
+      window.scrollTo(0, Math.max(0, absoluteTop - window.innerHeight / 2));
+      await sleep(DELETE_STEP_MS);
+    }
+    const rect = item.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight;
   }
 
   async function deleteNext(items) {
@@ -1444,8 +1475,13 @@
       }
 
       const item = items[i];
-      item.scrollIntoView({ behavior: 'instant', block: 'center' });
-      await sleep(DELETE_STEP_MS);
+      if (!await scrollItemIntoView(item)) {
+        // Couldn't get the row on-screen, so YouTube won't render its hover
+        // menu — skip rather than click a button that isn't really there.
+        skippedCount++;
+        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        continue;
+      }
 
       item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
       item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
@@ -1491,9 +1527,10 @@
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
-      if (document.querySelector(menuItemSel)) {
-        return [...document.querySelectorAll(menuItemSel)]
-          .find(mi => mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+      const opts = document.querySelectorAll(menuItemSel);
+      if (opts.length) {
+        return [...opts].find(mi =>
+          mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
       }
       await sleep(100);
     }
