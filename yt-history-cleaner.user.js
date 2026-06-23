@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.9
+// @version      1.10
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -1375,15 +1375,32 @@
     deleteNext(items);
   }
 
+  const isMenuButton = btn => {
+    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+    return label.includes('action') || label.includes('more');
+  };
+
   async function waitForMenuButton(item, timeout) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
-      const itemRect   = item.getBoundingClientRect();
-      const allButtons = document.querySelectorAll('button[aria-label]');
-      for (const btn of allButtons) {
-        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (!label.includes('action') && !label.includes('more')) continue;
+
+      // Fast path: the action button is almost always a descendant of the
+      // item. Scoping the query to the item's subtree avoids scanning every
+      // button on the (huge, 1000+ item) page and the per-button
+      // getBoundingClientRect layout reflow that pegs the CPU.
+      for (const btn of item.querySelectorAll('button[aria-label]')) {
+        if (!isMenuButton(btn)) continue;
+        const r = btn.getBoundingClientRect();
+        if (r.width > 0 || r.height > 0) return btn;
+      }
+
+      // Fallback: handles renderers that host the action button outside the
+      // item subtree (e.g. an overlay). Only reached when the scoped lookup
+      // above finds nothing, so the costly global scan stays off the hot path.
+      const itemRect = item.getBoundingClientRect();
+      for (const btn of document.querySelectorAll('button[aria-label]')) {
+        if (!isMenuButton(btn)) continue;
         const r = btn.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) continue;
         const cx = r.left + r.width / 2;
