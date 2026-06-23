@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.8
+// @version      1.9
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -55,6 +55,15 @@
         handleNav();
       }
     }).observe(document, { subtree: true, childList: true });
+
+    // Wake locks auto-release when the tab is hidden — reacquire once it's
+    // visible again if a scan/deletion is still mid-flight.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' &&
+          (currentState === STATE.SCANNING || currentState === STATE.DELETING)) {
+        acquireWakeLock();
+      }
+    });
   }
 
   const STYLES = `
@@ -483,6 +492,7 @@
   let cancelRequested   = false;
   let _navAbortFn       = null;
   let deletionStartTime = 0;
+  let wakeLockSentinel  = null;
 
   let calendarMode  = false;
   let calendarYear  = 0;
@@ -550,6 +560,27 @@
         worker.removeEventListener('message', handler);
       }
     });
+  }
+
+  // Screen Wake Lock — keeps the display from sleeping/locking while a scan
+  // or deletion is in progress. Only deters *screen* sleep; the spec releases
+  // the lock automatically when the tab is hidden, so it can't fight tab
+  // backgrounding (see visibilitychange handler in init() for reacquisition).
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator) || wakeLockSentinel) return;
+    try {
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+    } catch (err) {
+      wakeLockSentinel = null;
+    }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLockSentinel) {
+      wakeLockSentinel.release().catch(() => {});
+      wakeLockSentinel = null;
+    }
   }
 
   function injectStyles() {
@@ -1251,6 +1282,7 @@
     }
 
     setState(STATE.SCANNING, { count: 0 });
+    acquireWakeLock();
     scrollAndCollect(filterFn, pauseMs);
   }
 
@@ -1301,6 +1333,7 @@
 
   function onScanComplete() {
     document.getElementById('ytc-panel')?.scrollIntoView({ behavior: 'instant', block: 'start' });
+    releaseWakeLock();
 
     if (foundItems.size === 0) {
       setState(STATE.IDLE);
@@ -1333,6 +1366,7 @@
     window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
     const items = [...foundItems];
     setState(STATE.DELETING, { deleted: 0, total: items.length });
+    acquireWakeLock();
     deleteNext(items);
   }
 
@@ -1382,6 +1416,7 @@
       }
       if (cancelRequested) {
         removeNavAbort();
+        releaseWakeLock();
         setState(STATE.CANCELLED, { deleted: deletedCount, skipped: skippedCount });
         return;
       }
@@ -1426,6 +1461,7 @@
     }
 
     removeNavAbort();
+    releaseWakeLock();
     setState(STATE.DONE, { count: deletedCount, skipped: skippedCount });
   }
 
