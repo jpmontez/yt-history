@@ -1231,14 +1231,19 @@
       return d;
     }
 
-    const monthDay = text.match(/^([A-Za-z]+)\s+(\d+)$/);
+    // YouTube renders older sections with an abbreviated month and no year,
+    // e.g. "Jun 3", "May 26" — and occasionally a full name / trailing year.
+    // Match on the month-name prefix so both "Jun" and "June" resolve.
+    const monthDay = text.match(/^([A-Za-z]+)\s+(\d+)(?:,?\s+(\d{4}))?$/);
     if (monthDay) {
       const months = ['january','february','march','april','may','june',
                       'july','august','september','october','november','december'];
-      const mIdx = months.indexOf(monthDay[1].toLowerCase());
+      const key  = monthDay[1].toLowerCase();
+      const mIdx = months.findIndex(m => m.startsWith(key));
       if (mIdx !== -1) {
-        const d = new Date(today.getFullYear(), mIdx, parseInt(monthDay[2], 10));
-        if (d > today) d.setFullYear(d.getFullYear() - 1);
+        const year = monthDay[3] ? parseInt(monthDay[3], 10) : today.getFullYear();
+        const d = new Date(year, mIdx, parseInt(monthDay[2], 10));
+        if (!monthDay[3] && d > today) d.setFullYear(d.getFullYear() - 1);
         return d;
       }
     }
