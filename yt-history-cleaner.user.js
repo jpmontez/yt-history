@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.12
+// @version      1.14
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -12,7 +12,7 @@
   'use strict';
 
   // YouTube is a SPA — wait for an element before injecting
-  function waitForElement(selector, callback, interval = 300, maxWait = 15000) {
+  function waitForElement(selector, callback, interval = 100, maxWait = 15000) {
     const start = Date.now();
     const timer = setInterval(() => {
       const el = document.querySelector(selector);
@@ -46,15 +46,18 @@
     window.addEventListener('yt-navigate-finish',     handleNav);
     window.addEventListener('yt-page-data-updated',   handleNav);
 
-    // Fallback: detect SPA URL changes via MutationObserver in case YT events
-    // don't fire as expected for this transition.
+    // Fallback: detect SPA URL changes via polling in case YT events don't
+    // fire as expected for this transition. A subtree MutationObserver was
+    // tried here first but fired on every thumbnail load/recommendation
+    // re-render across all of YouTube, not just history — heavy CPU cost
+    // for a check this cheap.
     let lastUrl = location.href;
-    new MutationObserver(() => {
+    setInterval(() => {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         handleNav();
       }
-    }).observe(document, { subtree: true, childList: true });
+    }, 500);
 
     // Wake locks auto-release when the tab is hidden — reacquire once it's
     // visible again if a scan/deletion is still mid-flight.
@@ -1148,9 +1151,15 @@
     panel.insertBefore(btn, beforeNode);
   }
 
+  // Cached because this runs on every scan iteration. Self-healing: renderState
+  // replaces the info box, so a disconnected node just triggers a re-query.
+  let _scanCountEl = null;
+
   function updateScanningCount(count) {
-    const strong = document.querySelector('#ytc-panel .ytc-info-blue:not(#ytc-cal-summary) .ytc-info-strong');
-    if (strong) strong.textContent = `Found ${count} items`;
+    if (!_scanCountEl || !_scanCountEl.isConnected) {
+      _scanCountEl = document.querySelector('#ytc-panel .ytc-info-blue:not(#ytc-cal-summary) .ytc-info-strong');
+    }
+    if (_scanCountEl) _scanCountEl.textContent = `Found ${count} items`;
   }
 
   function updateDeletingProgress(deleted, total, skipped) {
@@ -1193,10 +1202,30 @@
     if (customSection) customSection.style.display = 'none';
   }
 
-  const SCROLL_PAUSE_MS = 800;
-  const SCROLL_MAX_SAME = 2;
-  const DELETE_STEP_MS  = 200;
-  const DIALOG_TIMEOUT  = 1500;
+  const SCROLL_PAUSE_MS     = 800;  // ceiling for a scroll batch, not a fixed wait
+  const SCROLL_POLL_MS      = 50;
+  const SCROLL_MAX_SAME     = 2;
+  const DELETE_STEP_MS      = 100;  // starting value; _stepMs adapts between MIN and MAX
+  const STEP_MIN_MS         = 80;
+  const STEP_MAX_MS         = 300;
+  const SETTLE_MS           = 60;
+  const MENU_POLL_MS        = 25;
+  const DIALOG_TIMEOUT      = 1500;
+  const CONFIRM_PROBE_ITEMS = 3;
+
+  // Adaptive pacing for the deletion loop. _stepMs backs off when items get
+  // skipped (YouTube lagging or throttling) and decays back down on a run of
+  // clean deletions, so a responsive page isn't held to a worst-case delay.
+  let _stepMs        = DELETE_STEP_MS;
+  let _cleanStreak   = 0;
+  let _lastScrollY   = -1;
+
+  // Whether YouTube actually raises a confirmation dialog for "Remove from
+  // watch history". Measured rather than assumed: the first few deletions
+  // probe for one, and if none ever appears the wait collapses to a single
+  // synchronous check. Seeing one even once re-enables the full wait.
+  let _confirmSeen   = 0;
+  let _confirmProbes = 0;
 
   function getCutoffDate() {
     const rangeEl = document.getElementById('ytc-range');
@@ -1276,33 +1305,70 @@
     cancelRequested = false;
 
     let filterFn;
-    let pauseMs = SCROLL_PAUSE_MS;
     if (calendarMode) {
       const range = getCustomRange();
       filterFn = (headerText) => isSectionInCustomRange(headerText, range);
     } else {
       const cutoff = getCutoffDate();
       filterFn = (headerText) => isSectionOlderThanCutoff(headerText, cutoff);
-      if (cutoff === null) pauseMs = 200;
     }
 
+    // All-time scans used to drop the pause to 200ms for speed, which risked
+    // reading a slow batch as a stall and stopping early. waitForGrowth gives
+    // the same speed without that trade, so one ceiling now serves both.
     setState(STATE.SCANNING, { count: 0 });
     acquireWakeLock();
-    scrollAndCollect(filterFn, pauseMs);
+    scrollAndCollect(filterFn);
   }
 
-  async function scrollAndCollect(filterFn, pauseMs = SCROLL_PAUSE_MS) {
+  // Resolve as soon as the feed grows past prevHeight, or at maxMs. YouTube
+  // usually appends the next batch well inside the ceiling, so waiting the
+  // full pause on every iteration was most of the scan's wall time.
+  async function waitForGrowth(prevHeight, maxMs) {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      await sleep(SCROLL_POLL_MS);
+      if (document.documentElement.scrollHeight > prevHeight) return true;
+    }
+    return false;
+  }
+
+  async function scrollAndCollect(filterFn) {
     let sameSizeCount = 0;
     let lastHeight    = 0;
 
+    // Per-run caches so each iteration costs O(new items) instead of
+    // O(everything collected so far).
+    //   verdicts: filterFn result per section, re-checked only if the header
+    //             text changed (a section can be re-rendered in place).
+    //   absorbed: how many #contents children were already walked.
+    const verdicts = new WeakMap();
+    const absorbed = new WeakMap();
+
     while (true) {
-      document.querySelectorAll('ytd-item-section-renderer').forEach(sec => {
+      for (const sec of document.querySelectorAll('ytd-item-section-renderer')) {
         const h = sec.querySelector('ytd-item-section-header-renderer');
-        if (!h || !filterFn(h.textContent.trim())) return;
+        if (!h) continue;
+
+        const headerText = h.textContent.trim();
+        let verdict = verdicts.get(sec);
+        if (!verdict || verdict.text !== headerText) {
+          verdict = { text: headerText, match: filterFn(headerText) };
+          verdicts.set(sec, verdict);
+          absorbed.delete(sec);
+        }
+        if (!verdict.match) continue;
+
         const contents = sec.querySelector('#contents') ||
                          (sec.shadowRoot && sec.shadowRoot.querySelector('#contents'));
-        if (!contents) return;
-        for (const child of contents.children) {
+        if (!contents) continue;
+
+        const children = contents.children;
+        // Rewind one child: the last one seen may have still been rendering.
+        // Re-adding is a no-op, foundItems is a Set.
+        const from = Math.max(0, (absorbed.get(sec) ?? 0) - 1);
+        for (let i = from; i < children.length; i++) {
+          const child = children[i];
           if (child.tagName === 'YTD-REEL-SHELF-RENDERER') {
             const reelItems = [...child.querySelectorAll('ytd-reel-item-renderer')];
             if (reelItems.length > 0) {
@@ -1319,7 +1385,8 @@
             foundItems.add(child);
           }
         }
-      });
+        absorbed.set(sec, children.length);
+      }
 
       updateScanningCount(foundItems.size);
 
@@ -1330,7 +1397,7 @@
       if (sameSizeCount >= SCROLL_MAX_SAME) break;
 
       window.scrollTo(0, currentHeight);
-      await sleep(pauseMs);
+      await waitForGrowth(currentHeight, SCROLL_PAUSE_MS);
     }
 
     onScanComplete();
@@ -1368,6 +1435,12 @@
     cancelRequested   = false;
     _navAbortFn       = () => { cancelRequested = true; };
     deletionStartTime = Date.now();
+    // Re-probe pacing and confirm-dialog behaviour from scratch each run.
+    _stepMs        = DELETE_STEP_MS;
+    _cleanStreak   = 0;
+    _lastScrollY   = -1;
+    _confirmSeen   = 0;
+    _confirmProbes = 0;
     window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
     const items = [...foundItems];
     setState(STATE.DELETING, { deleted: 0, total: items.length });
@@ -1424,14 +1497,36 @@
     return cancelRequested ? null : findMenuButtonByGeometry(item);
   }
 
-  async function waitForConfirmButton(timeout) {
-    const sel      = 'paper-button[dialog-confirm], yt-button-renderer[dialog-confirm] button';
+  const CONFIRM_SEL = [
+    'yt-confirm-dialog-renderer #confirm-button button',
+    'tp-yt-paper-dialog[opened] #confirm-button button',
+    'paper-button[dialog-confirm]',
+    'yt-button-renderer[dialog-confirm] button',
+  ].join(', ');
+
+  // "Remove from watch history" does not normally raise a confirmation dialog
+  // — it removes the row and shows a snackbar. Polling a fixed 600ms for one
+  // therefore burned that full budget on every single item, over half the
+  // per-item cost. So probe on the first few deletions and, if nothing ever
+  // appears, drop to a single synchronous check. If a dialog does show up
+  // (now, or after some future YouTube change), the full wait re-engages for
+  // the rest of the run.
+  async function waitForConfirmButton() {
+    const immediate = document.querySelector(CONFIRM_SEL);
+    if (immediate) { _confirmSeen++; return immediate; }
+
+    let timeout;
+    if (_confirmSeen > 0)                        timeout = 600;
+    else if (_confirmProbes < CONFIRM_PROBE_ITEMS) timeout = 400;
+    else                                         return null;
+
+    _confirmProbes++;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
-      const btn = document.querySelector(sel);
-      if (btn) return btn;
       await sleep(20);
+      const btn = document.querySelector(CONFIRM_SEL);
+      if (btn) { _confirmSeen++; return btn; }
     }
     return null;
   }
@@ -1447,12 +1542,21 @@
       const rect   = item.getBoundingClientRect();
       const center = rect.top + rect.height / 2;
       if (center >= 0 && center <= window.innerHeight) {
-        if (attempt === 0) await sleep(DELETE_STEP_MS); // settle on first pass
+        // Already in view. The first pass used to settle for a full step delay
+        // unconditionally, which — together with the step delay at the end of
+        // deleteNext — bracketed every item with two waits. Only settle if the
+        // viewport actually moved since the last item; if it didn't, there is
+        // nothing to settle and we can go straight to the menu.
+        if (attempt === 0 && window.scrollY !== _lastScrollY) {
+          _lastScrollY = window.scrollY;
+          await sleep(SETTLE_MS);
+        }
         return true;
       }
       const absoluteTop = rect.top + window.scrollY;
       window.scrollTo(0, Math.max(0, absoluteTop - window.innerHeight / 2));
-      await sleep(DELETE_STEP_MS);
+      _lastScrollY = window.scrollY;
+      await sleep(_stepMs);
     }
     const rect = item.getBoundingClientRect();
     return rect.bottom > 0 && rect.top < window.innerHeight;
@@ -1460,6 +1564,20 @@
 
   async function deleteNext(items) {
     const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
+
+    // The step delay is the safety valve that lets the other waits run tight.
+    // A row that wouldn't give up its menu means YouTube is lagging behind us,
+    // so slow down; a clean run of deletions earns the pace back.
+    const backOff = () => {
+      _stepMs      = Math.min(_stepMs + 50, STEP_MAX_MS);
+      _cleanStreak = 0;
+    };
+    const noteClean = () => {
+      if (++_cleanStreak >= 10) {
+        _cleanStreak = 0;
+        _stepMs      = Math.max(_stepMs - 25, STEP_MIN_MS);
+      }
+    };
 
     for (let i = 0; i < items.length; i++) {
       if (!document.contains(items[i])) {
@@ -1479,6 +1597,7 @@
         // Couldn't get the row on-screen, so YouTube won't render its hover
         // menu — skip rather than click a button that isn't really there.
         skippedCount++;
+        backOff();
         updateDeletingProgress(deletedCount, items.length, skippedCount);
         continue;
       }
@@ -1489,6 +1608,7 @@
 
       if (!menuBtn) {
         skippedCount++;
+        backOff();
         updateDeletingProgress(deletedCount, items.length, skippedCount);
         continue;
       }
@@ -1500,8 +1620,9 @@
       if (!removeBtn) {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         skippedCount++;
+        backOff();
         updateDeletingProgress(deletedCount, items.length, skippedCount);
-        await sleep(DELETE_STEP_MS);
+        await sleep(_stepMs);
         continue;
       }
 
@@ -1510,12 +1631,13 @@
       const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
       clickTarget.click();
 
-      const confirmBtn = await waitForConfirmButton(600);
+      const confirmBtn = await waitForConfirmButton();
       if (confirmBtn) confirmBtn.click();
 
       deletedCount++;
+      noteClean();
       updateDeletingProgress(deletedCount, items.length, skippedCount);
-      await sleep(DELETE_STEP_MS);
+      await sleep(_stepMs);
     }
 
     removeNavAbort();
@@ -1523,16 +1645,26 @@
     setState(STATE.DONE, { count: deletedCount, skipped: skippedCount });
   }
 
+  // Keep polling until the "Remove from watch history" entry actually shows up.
+  // Bailing on the first non-empty query (the previous behaviour) surrendered
+  // to half-rendered popups and to leftovers from the prior item, turning a
+  // deletable row into a skip — and a skip costs more time than waiting does.
+  // Scoping to the live dropdown is what makes a stale popup unable to match.
   async function waitForMenuOption(menuItemSel, timeout) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
-      const opts = document.querySelectorAll(menuItemSel);
-      if (opts.length) {
-        return [...opts].find(mi =>
-          mi.textContent.trim().toLowerCase().includes('remove from watch history')) ?? null;
+
+      const root = document.querySelector(
+        'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])'
+      ) || document;
+
+      for (const mi of root.querySelectorAll(menuItemSel)) {
+        if (mi.textContent.trim().toLowerCase().includes('remove from watch history')) {
+          return mi;
+        }
       }
-      await sleep(100);
+      await sleep(MENU_POLL_MS);
     }
     return null;
   }
