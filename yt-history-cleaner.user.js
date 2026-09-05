@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.14
+// @version      1.16
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -1219,6 +1219,7 @@
   let _stepMs        = DELETE_STEP_MS;
   let _cleanStreak   = 0;
   let _lastScrollY   = -1;
+  let _lastDocHeight = -1;
 
   // Whether YouTube actually raises a confirmation dialog for "Remove from
   // watch history". Measured rather than assumed: the first few deletions
@@ -1439,6 +1440,7 @@
     _stepMs        = DELETE_STEP_MS;
     _cleanStreak   = 0;
     _lastScrollY   = -1;
+    _lastDocHeight = -1;
     _confirmSeen   = 0;
     _confirmProbes = 0;
     window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
@@ -1531,6 +1533,74 @@
     return null;
   }
 
+  // The one dropdown YouTube reuses for every row's overflow menu. It stays in
+  // the DOM between items and is marked aria-hidden while closed, so "a menu is
+  // open" means an instance of this selector without that attribute.
+  const DROPDOWN_SEL = 'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])';
+
+  // Dismiss the menu the previous item left open, and wait until it is really
+  // gone. Clicking the next row's menu button while the old dropdown is still
+  // on screen makes YouTube treat that click as a dismiss and never open the
+  // new menu — and because the dropdown node is reused, waitForMenuOption then
+  // matches the *previous* row's "Remove from watch history" entry. Clicking
+  // that is a no-op against a row that is already deleted, so the current row
+  // survives while still being counted as removed. Until v1.12 the 200ms step
+  // delay plus an unconditional 200ms settle happened to cover the close
+  // animation; v1.14's tighter pacing no longer does, so close it explicitly.
+  async function closeOpenMenu(timeout = 500) {
+    if (!document.querySelector(DROPDOWN_SEL)) return true;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await sleep(MENU_POLL_MS);
+      if (!document.querySelector(DROPDOWN_SEL)) return true;
+    }
+    return false;
+  }
+
+  // Which video a row is currently showing. Polymer recycles a row's node for
+  // the next video instead of removing it, so node identity alone cannot tell
+  // "this row is gone" from "this row now holds the next item".
+  function itemFingerprint(item) {
+    const a = item.querySelector('a#video-title, a#thumbnail, a[href*="/watch"]');
+    return a ? a.getAttribute('href') : null;
+  }
+
+  // Removing a row is fire-and-forget, so confirming it happened is the only
+  // way to tell a real deletion from a click that landed on a stale menu.
+  // Detachment is NOT that signal: YouTube leaves the node in the document and
+  // hides, collapses, or recycles it, which made every genuine deletion read as
+  // a failure. scrollItemIntoView guarantees a non-zero box in view just before
+  // the click, so a box that has since collapsed is meaningful.
+  function isRemoved(item, fingerprint) {
+    if (!item.isConnected)        return true;
+    if (item.offsetParent === null) return true;
+    const r = item.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return true;
+    return fingerprint !== null && itemFingerprint(item) !== fingerprint;
+  }
+
+  async function waitForRemoval(item, fingerprint, timeout = 1200) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (isRemoved(item, fingerprint)) return true;
+      await sleep(MENU_POLL_MS);
+    }
+    return false;
+  }
+
+  // Deleting a row shrinks the feed above the rows below it, so the next item
+  // slides into place without window.scrollY ever changing. Gating the settle
+  // on scrollY alone therefore skipped it in the common case and probed rows
+  // mid-reflow, so watch the document height too.
+  function viewportSettled() {
+    const height  = document.documentElement.scrollHeight;
+    const settled = window.scrollY === _lastScrollY && height === _lastDocHeight;
+    _lastScrollY   = window.scrollY;
+    _lastDocHeight = height;
+    return settled;
+  }
+
   // Bring a row into the viewport before interacting with it. item.scrollIntoView
   // ({behavior:'instant'}) is unreliable in Safari and silently no-ops there,
   // which left every row below the fold off-screen — YouTube never renders an
@@ -1539,7 +1609,18 @@
   // actually landed in view and retry before giving up.
   async function scrollItemIntoView(item) {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const rect   = item.getBoundingClientRect();
+      const rect = item.getBoundingClientRect();
+
+      // A row YouTube has not laid out yet measures as an all-zero box, and the
+      // centre test below reads those zeros as "already in view" (0 >= 0 and
+      // 0 <= innerHeight). That silently exempted exactly the rows that needed
+      // scrolling: no scroll, no settle, straight to a menu that isn't there.
+      // Give it a step to acquire a box instead of trusting the zeros.
+      if (rect.width === 0 && rect.height === 0) {
+        await sleep(_stepMs);
+        continue;
+      }
+
       const center = rect.top + rect.height / 2;
       if (center >= 0 && center <= window.innerHeight) {
         // Already in view. The first pass used to settle for a full step delay
@@ -1547,15 +1628,13 @@
         // deleteNext — bracketed every item with two waits. Only settle if the
         // viewport actually moved since the last item; if it didn't, there is
         // nothing to settle and we can go straight to the menu.
-        if (attempt === 0 && window.scrollY !== _lastScrollY) {
-          _lastScrollY = window.scrollY;
-          await sleep(SETTLE_MS);
-        }
+        if (attempt === 0 && !viewportSettled()) await sleep(SETTLE_MS);
         return true;
       }
       const absoluteTop = rect.top + window.scrollY;
       window.scrollTo(0, Math.max(0, absoluteTop - window.innerHeight / 2));
-      _lastScrollY = window.scrollY;
+      _lastScrollY   = window.scrollY;
+      _lastDocHeight = document.documentElement.scrollHeight;
       await sleep(_stepMs);
     }
     const rect = item.getBoundingClientRect();
@@ -1580,7 +1659,7 @@
     };
 
     for (let i = 0; i < items.length; i++) {
-      if (!document.contains(items[i])) {
+      if (!items[i].isConnected) {
         skippedCount++;
         updateDeletingProgress(deletedCount, items.length, skippedCount);
         continue;
@@ -1613,6 +1692,7 @@
         continue;
       }
 
+      await closeOpenMenu();
       menuBtn.click();
 
       const removeBtn = await waitForMenuOption(menuItemSel, DIALOG_TIMEOUT);
@@ -1626,6 +1706,8 @@
         continue;
       }
 
+      const fingerprint = itemFingerprint(item);
+
       // yt-list-item-view-model doesn't handle click directly —
       // find the actual clickable child element inside it
       const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
@@ -1634,8 +1716,16 @@
       const confirmBtn = await waitForConfirmButton();
       if (confirmBtn) confirmBtn.click();
 
-      deletedCount++;
-      noteClean();
+      // Counting the click as a deletion is what made failures invisible: a
+      // row that never went away still incremented the total, so the panel
+      // reported a clean run over history that was still sitting there.
+      if (await waitForRemoval(item, fingerprint)) {
+        deletedCount++;
+        noteClean();
+      } else {
+        skippedCount++;
+        backOff();
+      }
       updateDeletingProgress(deletedCount, items.length, skippedCount);
       await sleep(_stepMs);
     }
@@ -1655,14 +1745,19 @@
     while (Date.now() < deadline) {
       if (cancelRequested) return null;
 
-      const root = document.querySelector(
-        'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])'
-      ) || document;
+      const root     = document.querySelector(DROPDOWN_SEL);
+      const fallback = !root;
 
-      for (const mi of root.querySelectorAll(menuItemSel)) {
-        if (mi.textContent.trim().toLowerCase().includes('remove from watch history')) {
-          return mi;
+      for (const mi of (root || document).querySelectorAll(menuItemSel)) {
+        if (!mi.textContent.trim().toLowerCase().includes('remove from watch history')) continue;
+        // Scoping to the live dropdown is what makes a stale popup unable to
+        // match. On the unscoped fallback that guarantee is gone, so pay for a
+        // measurement there and reject an entry with no box on screen.
+        if (fallback) {
+          const r = mi.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
         }
+        return mi;
       }
       await sleep(MENU_POLL_MS);
     }
