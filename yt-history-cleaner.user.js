@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.16
+// @version      1.20
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -537,6 +537,69 @@
     }
   }
 
+  // Hidden tabs clamp setTimeout to ~1s, so a 150ms-per-item deletion stretches
+  // to seconds per item and starts skipping rows outright. The Worker above can
+  // never help on YouTube — Trusted Types rejects the blob URL, and CSP blocks
+  // blob: workers even past that — but the audio clock runs on its own thread
+  // and is not throttled while the tab is hidden. Scheduling a silent source to
+  // stop and waiting for its 'ended' event gives a timer that needs no URL at
+  // all, so nothing in YouTube's CSP has anything to bite on.
+  let _audioCtx    = null;
+  let _audioSink   = null;
+  let _audioFailed = false;
+
+  function getAudioClock() {
+    if (_audioFailed) return null;
+    if (_audioCtx)    return _audioCtx;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) { _audioFailed = true; return null; }
+      const ctx = new Ctx();
+      // The graph has to reach the destination for the context to keep running,
+      // so it terminates in a zero gain node and never makes a sound.
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      sink.connect(ctx.destination);
+      _audioCtx  = ctx;
+      _audioSink = sink;
+      return ctx;
+    } catch (err) {
+      _audioFailed = true;
+      return null;
+    }
+  }
+
+  // Autoplay policy only lets a context start from a user gesture, so this is
+  // called synchronously from the Scan/Delete click, not lazily from sleep().
+  function startAudioClock() {
+    const ctx = getAudioClock();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  }
+
+  // Closing it drops the tab's audio indicator as soon as a run finishes.
+  function stopAudioClock() {
+    if (_audioCtx) {
+      _audioCtx.close().catch(() => {});
+      _audioCtx  = null;
+      _audioSink = null;
+    }
+  }
+
+  function audioSleep(ms) {
+    const ctx = getAudioClock();
+    if (!ctx || ctx.state !== 'running') return null;
+    try {
+      const src = ctx.createConstantSource();
+      src.connect(_audioSink);
+      const ended = new Promise(resolve => { src.onended = resolve; });
+      src.start();
+      src.stop(ctx.currentTime + ms / 1000);
+      return ended;
+    } catch (err) {
+      return null;
+    }
+  }
+
   function sleep(ms) {
     return new Promise(resolve => {
       let done = false;
@@ -545,6 +608,12 @@
       // Always-on backup: setTimeout guarantees the promise resolves
       // even if the worker is dead, throttled, or silently blocked.
       setTimeout(finish, ms);
+
+      // Unthrottled in hidden tabs, where the setTimeout above is clamped to
+      // ~1s. Purely additive — if the context never started, this is a no-op
+      // and the timer above still carries the run.
+      const audio = audioSleep(ms);
+      if (audio) audio.then(finish);
 
       const worker = getTimerWorker();
       if (!worker) return;
@@ -570,6 +639,8 @@
   // the lock automatically when the tab is hidden, so it can't fight tab
   // backgrounding (see visibilitychange handler in init() for reacquisition).
   async function acquireWakeLock() {
+    // Must run synchronously off the originating click — see startAudioClock.
+    startAudioClock();
     if (!('wakeLock' in navigator) || wakeLockSentinel) return;
     try {
       wakeLockSentinel = await navigator.wakeLock.request('screen');
@@ -580,6 +651,7 @@
   }
 
   function releaseWakeLock() {
+    stopAudioClock();
     if (wakeLockSentinel) {
       wakeLockSentinel.release().catch(() => {});
       wakeLockSentinel = null;
@@ -1203,10 +1275,10 @@
   }
 
   const SCROLL_PAUSE_MS     = 800;  // ceiling for a scroll batch, not a fixed wait
-  const SCROLL_POLL_MS      = 50;
+  const SCROLL_POLL_MS      = 25;
   const SCROLL_MAX_SAME     = 2;
-  const DELETE_STEP_MS      = 100;  // starting value; _stepMs adapts between MIN and MAX
-  const STEP_MIN_MS         = 80;
+  const DELETE_STEP_MS      = 60;   // starting value; _stepMs adapts between MIN and MAX
+  const STEP_MIN_MS         = 25;
   const STEP_MAX_MS         = 300;
   const SETTLE_MS           = 60;
   const MENU_POLL_MS        = 25;
@@ -1317,6 +1389,9 @@
     // All-time scans used to drop the pause to 200ms for speed, which risked
     // reading a slow batch as a stall and stopping early. waitForGrowth gives
     // the same speed without that trade, so one ceiling now serves both.
+    // Before any scrolling: continuation responses carry the tokens for every
+    // row past the first screenful, and they are only observable in flight.
+    installTokenHarvester();
     setState(STATE.SCANNING, { count: 0 });
     acquireWakeLock();
     scrollAndCollect(filterFn);
@@ -1395,6 +1470,11 @@
       sameSizeCount = currentHeight === lastHeight ? sameSizeCount + 1 : 0;
       lastHeight = currentHeight;
 
+      // A feed with more to load keeps a continuation spinner at the bottom.
+      // Once that is gone and the page has stopped growing, the end is certain,
+      // so stop there rather than spending SCROLL_MAX_SAME further ceilings —
+      // up to 1.6s of dead wait — confirming it by timeout.
+      if (sameSizeCount >= 1 && !document.querySelector('ytd-continuation-item-renderer')) break;
       if (sameSizeCount >= SCROLL_MAX_SAME) break;
 
       window.scrollTo(0, currentHeight);
@@ -1538,6 +1618,10 @@
   // open" means an instance of this selector without that attribute.
   const DROPDOWN_SEL = 'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])';
 
+  function dismissOpenMenu() {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  }
+
   // Dismiss the menu the previous item left open, and wait until it is really
   // gone. Clicking the next row's menu button while the old dropdown is still
   // on screen makes YouTube treat that click as a dismiss and never open the
@@ -1549,7 +1633,11 @@
   // animation; v1.14's tighter pacing no longer does, so close it explicitly.
   async function closeOpenMenu(timeout = 500) {
     if (!document.querySelector(DROPDOWN_SEL)) return true;
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    dismissOpenMenu();
+    // Re-check before paying for a poll: deleteNext now dismisses the menu as
+    // soon as the previous row is handled, so by the time we get here the
+    // animation has usually already finished and this returns without sleeping.
+    if (!document.querySelector(DROPDOWN_SEL)) return true;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       await sleep(MENU_POLL_MS);
@@ -1601,6 +1689,17 @@
     return settled;
   }
 
+  // Two animation frames is the real "layout has settled" signal and usually
+  // lands in ~32ms against the old flat 60ms. rAF never fires in a hidden tab
+  // though, so race it against that same fixed wait: the foreground gets the
+  // cut, a background tab still resolves on the timer.
+  function settleFrames() {
+    const frames = new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+    return Promise.race([frames, sleep(SETTLE_MS)]);
+  }
+
   // Bring a row into the viewport before interacting with it. item.scrollIntoView
   // ({behavior:'instant'}) is unreliable in Safari and silently no-ops there,
   // which left every row below the fold off-screen — YouTube never renders an
@@ -1628,7 +1727,7 @@
         // deleteNext — bracketed every item with two waits. Only settle if the
         // viewport actually moved since the last item; if it didn't, there is
         // nothing to settle and we can go straight to the menu.
-        if (attempt === 0 && !viewportSettled()) await sleep(SETTLE_MS);
+        if (attempt === 0 && !viewportSettled()) await settleFrames();
         return true;
       }
       const absoluteTop = rect.top + window.scrollY;
@@ -1639,6 +1738,217 @@
     }
     const rect = item.getBoundingClientRect();
     return rect.bottom > 0 && rect.top < window.innerHeight;
+  }
+
+  // ---------------------------------------------------------------------------
+  // InnerTube fast path
+  //
+  // Deleting through the UI costs a scroll, a hover, a menu open, a click and a
+  // removal check per row. The menu entry those clicks eventually reach is just
+  // a POST to /youtubei/v1/feedback carrying an opaque feedbackToken, and that
+  // endpoint takes an ARRAY of tokens — so the whole run can collapse into a
+  // handful of requests.
+  //
+  // Verified against the live page (2026-09-05):
+  //   - Rows render as yt-lockup-view-model. The ELEMENT exposes no token at
+  //     all: rawProps, componentProps, _signalValues, slotProps, _signalProps
+  //     and queuingData were all searched and are empty of it. There is no
+  //     Polymer .data on these, so the token has to come from the JSON.
+  //   - In the payload it sits at
+  //       lockupViewModel -> ... -> listItemViewModel{title "Remove from watch
+  //       history"} -> rendererContext.commandContext.onTap.innertubeCommand
+  //       -> feedbackEndpoint.feedbackToken
+  //   - lockupViewModel.contentId is the videoId, which is also in the row's
+  //     /watch?v= href — that is the join between DOM row and token.
+  //   - 55/55 visible rows resolved this way, zero misses.
+  const _tokenMap = new Map();   // videoId -> { tok, ctp }
+  let _harvestInstalled = false;
+  let _apiUsable = null;         // null = unproven, true/false = measured
+
+  // Find the token for the "Remove from watch history" entry specifically.
+  // Taking the first feedbackToken in the subtree is NOT safe: at page level
+  // the earliest ones belong to the sidebar's "Clear all watch history" button,
+  // and firing one of those would wipe the entire history instead of one row.
+  // Depth caps are also a trap here — this nests deeper than it looks (a cap of
+  // 14 finds nothing, 25 finds a fraction), so the walk is uncapped and relies
+  // on the WeakSet to terminate.
+  function removeCommandOfLockup(lockup) {
+    let found = null;
+    const seen = new WeakSet();
+    (function walk(x) {
+      if (found || !x || typeof x !== 'object' || seen.has(x)) return;
+      seen.add(x);
+      const li = x.listItemViewModel;
+      if (li && li.title && typeof li.title.content === 'string' &&
+          /remove from watch history/i.test(li.title.content)) {
+        const inner = new WeakSet();
+        (function dig(y) {
+          if (found || !y || typeof y !== 'object' || inner.has(y)) return;
+          inner.add(y);
+          // Prefer the innertubeCommand itself: it carries the token in
+          // .feedbackEndpoint AND its own clickTrackingParams as a sibling, so
+          // one match yields both halves of the request.
+          if (y.feedbackEndpoint && typeof y.feedbackEndpoint.feedbackToken === 'string') {
+            found = { tok: y.feedbackEndpoint.feedbackToken,
+                      ctp: typeof y.clickTrackingParams === 'string' ? y.clickTrackingParams : null };
+            return;
+          }
+          // Fallback for a shape that hangs the token somewhere else; the
+          // request still goes out, just without clickTracking.
+          if (typeof y.feedbackToken === 'string') { found = { tok: y.feedbackToken, ctp: null }; return; }
+          for (const k of Object.keys(y)) { try { dig(y[k]); } catch (e) {} }
+        })(li);
+        if (found) return;
+      }
+      for (const k of Object.keys(x)) { try { walk(x[k]); } catch (e) {} }
+    })(lockup);
+    return found;
+  }
+
+  function harvestTokens(root) {
+    if (!root || typeof root !== 'object') return;
+    const seen = new WeakSet();
+    (function walk(o) {
+      if (!o || typeof o !== 'object' || seen.has(o)) return;
+      seen.add(o);
+      const lk = o.lockupViewModel;
+      if (lk && lk.contentId && !_tokenMap.has(lk.contentId)) {
+        const c = removeCommandOfLockup(lk);
+        if (c) _tokenMap.set(lk.contentId, c);
+      }
+      for (const k of Object.keys(o)) { try { walk(o[k]); } catch (e) {} }
+    })(root);
+  }
+
+  // ytInitialData only covers the first screenful. Everything the scan scrolls
+  // to arrives in /youtubei/v1/browse continuations, so the harvester has to be
+  // in place BEFORE scrolling or most rows will have no token. The wrapper
+  // never alters the request or the returned promise — it clones the response
+  // and reads it on the side, so a failure here cannot break the page.
+  function installTokenHarvester() {
+    if (_harvestInstalled) return;
+    _harvestInstalled = true;
+    try { harvestTokens(window.ytInitialData); } catch (e) {}
+    const origFetch = window.fetch;
+    if (typeof origFetch !== 'function') return;
+    window.fetch = function (...args) {
+      const promise = origFetch.apply(this, args);
+      try {
+        const req = args[0];
+        const url = typeof req === 'string' ? req : (req && req.url) || '';
+        if (/\/youtubei\/v1\/(browse|next)/.test(url)) {
+          promise.then(res => {
+            try {
+              res.clone().json().then(j => { try { harvestTokens(j); } catch (e) {} }, () => {});
+            } catch (e) {}
+          }, () => {});
+        }
+      } catch (e) {}
+      return promise;
+    };
+  }
+
+  function videoIdOf(item) {
+    const a = item.querySelector('a[href*="/watch"]');
+    const m = a && (a.getAttribute('href') || '').match(/[?&]v=([^&]+)/);
+    return m ? m[1] : null;
+  }
+
+  // One POST, many tokens. Resolves to the number the server reported as
+  // processed, or -1 if the call itself failed (auth, shape, network) so the
+  // caller can fall back to the DOM rather than silently counting nothing.
+  async function apiDeleteBatch(tokens, clickTrackingParams) {
+    let key, context;
+    try {
+      key     = window.ytcfg && ytcfg.get('INNERTUBE_API_KEY');
+      context = window.ytcfg && ytcfg.get('INNERTUBE_CONTEXT');
+    } catch (e) { return -1; }
+    if (!key || !context) return -1;
+
+    let res;
+    try {
+      res = await fetch('/youtubei/v1/feedback?key=' + encodeURIComponent(key) + '&prettyPrint=false', {
+        method:      'POST',
+        credentials: 'include',
+        headers:     { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // The top-level envelope below was already correct — a hand-captured
+          // request from YouTube's own UI carries exactly these four keys with
+          // these two boolean values. What the first attempt got HTTP 400
+          // "Request contains an invalid argument" for was the CONTEXT:
+          // ytcfg's INNERTUBE_CONTEXT has no clickTracking, and the endpoint
+          // wants the clickTrackingParams belonging to the very menu command
+          // the token came from. Harvested together in removeCommandOfLockup.
+          context: clickTrackingParams
+            ? Object.assign({}, context, { clickTracking: { clickTrackingParams } })
+            : context,
+          feedbackTokens:            tokens,
+          isFeedbackTokenUnencrypted: false,
+          shouldMerge:                false,
+        }),
+      });
+    } catch (e) { return -1; }
+    if (!res.ok) return -1;
+
+    let json;
+    try { json = await res.json(); } catch (e) { return -1; }
+    const responses = json && json.feedbackResponses;
+    if (!Array.isArray(responses)) {
+      // No per-token breakdown. Trust it only if the request itself succeeded.
+      return json && json.responseContext ? tokens.length : -1;
+    }
+    return responses.filter(r => r && r.isProcessed).length;
+  }
+
+  // Delete everything we hold a token for, and return the rows that still need
+  // the DOM path. The first row goes out ALONE and is confirmed against the DOM
+  // before anything is batched: an endpoint that answers 200 while changing
+  // nothing would otherwise burn the whole queue reporting a clean run over
+  // history that is still there — the exact failure v1.16 was written to stop.
+  async function deleteViaApi(items, total) {
+    if (!items.length) return items;
+
+    const pending = [];
+    for (const item of items) {
+      const id  = item.isConnected ? videoIdOf(item) : null;
+      const cmd = id && _tokenMap.get(id);
+      if (cmd) pending.push({ item, tok: cmd.tok, ctp: cmd.ctp });
+    }
+    if (!pending.length) return items;
+
+    const done = new Set();
+
+    if (_apiUsable === null) {
+      const probe       = pending[0];
+      const fingerprint = itemFingerprint(probe.item);
+      const processed   = await apiDeleteBatch([probe.tok], probe.ctp);
+      if (processed === 1 && await waitForRemoval(probe.item, fingerprint, 3000)) {
+        _apiUsable = true;
+        done.add(probe.item);
+        deletedCount++;
+        updateDeletingProgress(deletedCount, total, skippedCount);
+      } else {
+        // Either the call failed or the row outlived it. Either way the fast
+        // path is not trustworthy on this account today — hand everything back.
+        _apiUsable = false;
+        return items;
+      }
+    }
+    if (_apiUsable !== true) return items;
+
+    const BATCH = 50;
+    const rest  = pending.filter(p => !done.has(p.item));
+    for (let i = 0; i < rest.length; i += BATCH) {
+      if (cancelRequested) break;
+      const slice     = rest.slice(i, i + BATCH);
+      const processed = await apiDeleteBatch(slice.map(p => p.tok), slice[0].ctp);
+      if (processed < 0) break;                 // fall back for the remainder
+      for (const p of slice) done.add(p.item);
+      deletedCount += Math.min(processed, slice.length);
+      updateDeletingProgress(deletedCount, total, skippedCount);
+    }
+
+    return items.filter(it => !done.has(it));
   }
 
   async function deleteNext(items) {
@@ -1652,16 +1962,21 @@
       _cleanStreak = 0;
     };
     const noteClean = () => {
-      if (++_cleanStreak >= 10) {
+      if (++_cleanStreak >= 5) {
         _cleanStreak = 0;
         _stepMs      = Math.max(_stepMs - 25, STEP_MIN_MS);
       }
     };
 
+    // Fast path first; whatever it could not resolve falls through to the DOM
+    // loop below, which stays exactly as it was.
+    const total = items.length;
+    items = await deleteViaApi(items, total);
+
     for (let i = 0; i < items.length; i++) {
       if (!items[i].isConnected) {
         skippedCount++;
-        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        updateDeletingProgress(deletedCount, total, skippedCount);
         continue;
       }
       if (cancelRequested) {
@@ -1677,7 +1992,7 @@
         // menu — skip rather than click a button that isn't really there.
         skippedCount++;
         backOff();
-        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        updateDeletingProgress(deletedCount, total, skippedCount);
         continue;
       }
 
@@ -1688,7 +2003,7 @@
       if (!menuBtn) {
         skippedCount++;
         backOff();
-        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        updateDeletingProgress(deletedCount, total, skippedCount);
         continue;
       }
 
@@ -1701,7 +2016,7 @@
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         skippedCount++;
         backOff();
-        updateDeletingProgress(deletedCount, items.length, skippedCount);
+        updateDeletingProgress(deletedCount, total, skippedCount);
         await sleep(_stepMs);
         continue;
       }
@@ -1716,6 +2031,14 @@
       const confirmBtn = await waitForConfirmButton();
       if (confirmBtn) confirmBtn.click();
 
+      // Start the dropdown closing now so its animation overlaps waitForRemoval
+      // and the step delay below, instead of being paid serially at the top of
+      // the next item. closeOpenMenu() then normally finds it already gone.
+      // This has to come *after* the confirm handling: an Escape dispatched
+      // while a confirmation dialog is up dismisses the dialog itself and
+      // cancels the very deletion we are waiting to observe.
+      dismissOpenMenu();
+
       // Counting the click as a deletion is what made failures invisible: a
       // row that never went away still incremented the total, so the panel
       // reported a clean run over history that was still sitting there.
@@ -1726,7 +2049,7 @@
         skippedCount++;
         backOff();
       }
-      updateDeletingProgress(deletedCount, items.length, skippedCount);
+      updateDeletingProgress(deletedCount, total, skippedCount);
       await sleep(_stepMs);
     }
 
