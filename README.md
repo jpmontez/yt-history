@@ -30,6 +30,8 @@ The panel appears in the sidebar on desktop, or above the video feed on mobile.
 4. The script works through each item: scrolls it into view, clicks the "More actions" menu, selects "Remove from watch history", and confirms. A progress bar and live ETA track completion.
 5. When finished, a green confirmation shows how many items were deleted. Click **Refresh Page** to reload and see the changes.
 
+**Removing a single video:** Hover (or tab to) any thumbnail in the feed and a **✕** appears in its top-right corner — click it to remove just that video, without opening YouTube's own menu. It's disabled while a scan or batch deletion is running.
+
 ---
 
 ## Time Range Options

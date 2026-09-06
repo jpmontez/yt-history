@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.20
+// @version      1.21
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -31,6 +31,7 @@
       const existing  = document.getElementById('ytc-panel');
       if (!onHistory && existing) {
         existing.remove();
+        teardownRowHoverListeners();
       } else if (onHistory && !existing) {
         injectPanel();
       }
@@ -476,6 +477,81 @@
   html[dark] #ytc-panel .ytc-cal-cell.selected-single {
     background: #1a73e8;
     color: #fff;
+  }
+
+  /* Manual per-row delete button. Lives inside YouTube's own thumbnail
+     markup, not the panel, and sits over an arbitrary photograph — so its
+     rest state borrows the same dark scrim YouTube's own duration badge
+     uses rather than assuming anything about page background or theme. */
+  #ytc-row-x {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-sizing: border-box;
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.94);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    z-index: 3;
+  }
+  #ytc-row-x::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    background: rgba(15, 15, 15, 0.72);
+    transition: background-color 0.15s ease;
+  }
+  #ytc-row-x.ytc-row-x-visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+  #ytc-row-x:hover::before,
+  #ytc-row-x:focus-visible::before {
+    background: #CC0000;
+  }
+  #ytc-row-x:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+  #ytc-row-x:disabled {
+    cursor: default;
+  }
+  #ytc-row-x .ytc-row-x-icon,
+  #ytc-row-x .ytc-row-x-spinner {
+    color: #fff;
+  }
+  #ytc-row-x .ytc-row-x-spinner {
+    display: none;
+  }
+  #ytc-row-x.ytc-row-x-busy .ytc-row-x-icon {
+    display: none;
+  }
+  #ytc-row-x.ytc-row-x-busy .ytc-row-x-spinner {
+    display: block;
+    animation: ytc-row-x-spin 0.8s linear infinite;
+  }
+  @keyframes ytc-row-x-spin {
+    to { transform: rotate(360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #ytc-row-x {
+      transition: none;
+      transform: none;
+    }
+    #ytc-row-x.ytc-row-x-busy .ytc-row-x-spinner {
+      animation: none;
+    }
   }
 `;
 
@@ -1373,6 +1449,7 @@
 
   function handleScan() {
     if (currentState !== STATE.IDLE) return;
+    if (_manualBusy) return; // a row's ✕ click is still resolving
     foundItems      = new Set();
     deletedCount    = 0;
     cancelRequested = false;
@@ -1511,6 +1588,7 @@
 
   function handleDelete() {
     if (currentState !== STATE.READY) return;
+    if (_manualBusy) return; // a row's ✕ click is still resolving
     deletedCount      = 0;
     skippedCount      = 0;
     cancelRequested   = false;
@@ -1531,6 +1609,10 @@
   }
 
   const isMenuButton = btn => {
+    // Never our own row-✕ button: it lives inside the row like YouTube's own
+    // menu button does, so an unguarded label match here would let the batch
+    // deleter click it as if it were "More actions".
+    if (btn.dataset.ytcX) return false;
     const label = (btn.getAttribute('aria-label') || '').toLowerCase();
     return label.includes('action') || label.includes('more');
   };
@@ -1616,7 +1698,8 @@
   // The one dropdown YouTube reuses for every row's overflow menu. It stays in
   // the DOM between items and is marked aria-hidden while closed, so "a menu is
   // open" means an instance of this selector without that attribute.
-  const DROPDOWN_SEL = 'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])';
+  const DROPDOWN_SEL  = 'ytd-popup-container tp-yt-iron-dropdown:not([aria-hidden="true"])';
+  const MENU_ITEM_SEL = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
 
   function dismissOpenMenu() {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -1951,9 +2034,65 @@
     return items.filter(it => !done.has(it));
   }
 
-  async function deleteNext(items) {
-    const menuItemSel = 'ytd-menu-service-item-renderer, tp-yt-paper-item, yt-list-item-view-model';
+  // The click sequence for one row: hover -> open its ⋮ menu -> click "Remove
+  // from watch history" -> confirm if asked -> verify the row actually went
+  // away. Shared by the batch loop below and the single-row ✕ button, so a fix
+  // to this sequence only ever needs to happen once. Callers own everything
+  // this does NOT do: counters, pacing/backoff, and the trailing step delay —
+  // see the reason -> behavior table in the plan this was built from.
+  async function domRemoveItem(item) {
+    if (!await scrollItemIntoView(item)) {
+      // Couldn't get the row on-screen, so YouTube won't render its hover
+      // menu — skip rather than click a button that isn't really there.
+      return { ok: false, reason: 'scroll' };
+    }
 
+    item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
+    const menuBtn = await waitForMenuButton(item, 300);
+
+    if (!menuBtn) {
+      return { ok: false, reason: 'menu' };
+    }
+
+    await closeOpenMenu();
+    menuBtn.click();
+
+    const removeBtn = await waitForMenuOption(MENU_ITEM_SEL, DIALOG_TIMEOUT);
+
+    if (!removeBtn) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return { ok: false, reason: 'option' };
+    }
+
+    const fingerprint = itemFingerprint(item);
+
+    // yt-list-item-view-model doesn't handle click directly —
+    // find the actual clickable child element inside it
+    const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
+    clickTarget.click();
+
+    const confirmBtn = await waitForConfirmButton();
+    if (confirmBtn) confirmBtn.click();
+
+    // Start the dropdown closing now so its animation overlaps waitForRemoval
+    // and the step delay the caller pays, instead of being paid serially at
+    // the top of the next item. closeOpenMenu() then normally finds it already
+    // gone. This has to come *after* the confirm handling: an Escape dispatched
+    // while a confirmation dialog is up dismisses the dialog itself and
+    // cancels the very deletion we are waiting to observe.
+    dismissOpenMenu();
+
+    // Counting the click as a deletion is what made failures invisible: a
+    // row that never went away still incremented the total, so the panel
+    // reported a clean run over history that was still sitting there.
+    if (await waitForRemoval(item, fingerprint)) {
+      return { ok: true, reason: 'ok' };
+    }
+    return { ok: false, reason: 'removal' };
+  }
+
+  async function deleteNext(items) {
     // The step delay is the safety valve that lets the other waits run tight.
     // A row that wouldn't give up its menu means YouTube is lagging behind us,
     // so slow down; a clean run of deletions earns the pace back.
@@ -1987,69 +2126,23 @@
       }
 
       const item = items[i];
-      if (!await scrollItemIntoView(item)) {
-        // Couldn't get the row on-screen, so YouTube won't render its hover
-        // menu — skip rather than click a button that isn't really there.
-        skippedCount++;
-        backOff();
-        updateDeletingProgress(deletedCount, total, skippedCount);
-        continue;
-      }
+      const { ok, reason } = await domRemoveItem(item);
 
-      item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-      item.dispatchEvent(new MouseEvent('mouseover',  { bubbles: true }));
-      const menuBtn = await waitForMenuButton(item, 300);
-
-      if (!menuBtn) {
-        skippedCount++;
-        backOff();
-        updateDeletingProgress(deletedCount, total, skippedCount);
-        continue;
-      }
-
-      await closeOpenMenu();
-      menuBtn.click();
-
-      const removeBtn = await waitForMenuOption(menuItemSel, DIALOG_TIMEOUT);
-
-      if (!removeBtn) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        skippedCount++;
-        backOff();
+      if (ok) {
+        deletedCount++;
+        noteClean();
         updateDeletingProgress(deletedCount, total, skippedCount);
         await sleep(_stepMs);
         continue;
       }
 
-      const fingerprint = itemFingerprint(item);
-
-      // yt-list-item-view-model doesn't handle click directly —
-      // find the actual clickable child element inside it
-      const clickTarget = removeBtn.querySelector('button, a, [role="option"], [role="menuitem"]') || removeBtn;
-      clickTarget.click();
-
-      const confirmBtn = await waitForConfirmButton();
-      if (confirmBtn) confirmBtn.click();
-
-      // Start the dropdown closing now so its animation overlaps waitForRemoval
-      // and the step delay below, instead of being paid serially at the top of
-      // the next item. closeOpenMenu() then normally finds it already gone.
-      // This has to come *after* the confirm handling: an Escape dispatched
-      // while a confirmation dialog is up dismisses the dialog itself and
-      // cancels the very deletion we are waiting to observe.
-      dismissOpenMenu();
-
-      // Counting the click as a deletion is what made failures invisible: a
-      // row that never went away still incremented the total, so the panel
-      // reported a clean run over history that was still sitting there.
-      if (await waitForRemoval(item, fingerprint)) {
-        deletedCount++;
-        noteClean();
-      } else {
-        skippedCount++;
-        backOff();
-      }
+      skippedCount++;
+      backOff();
       updateDeletingProgress(deletedCount, total, skippedCount);
+
+      // 'scroll' and 'menu' failures paid no wait in the original loop — the
+      // row was never actually interacted with, so there's nothing to settle.
+      if (reason === 'scroll' || reason === 'menu') continue;
       await sleep(_stepMs);
     }
 
@@ -2087,6 +2180,234 @@
     return null;
   }
 
+  // ---------------------------------------------------------------------------
+  // Manual per-row delete (the ✕ button)
+  //
+  // One reusable button is moved into whichever row's thumbnail is hovered or
+  // focused, driven by delegated listeners on the history page's browse
+  // element — never a per-row injection, and never a MutationObserver (see the
+  // note in init() about the CPU cost that caused on this project).
+  //
+  // Everything below is written around one constraint: this must never be able
+  // to interfere with a scan or a batch delete in progress. Each guard has a
+  // number; see the plan's "Non-interference contract" for the full reasoning.
+
+  const ROW_SEL = 'yt-lockup-view-model, ytd-video-renderer';
+
+  // Tried in order; the first match hosts the button. The fallback — the same
+  // watch-page anchor videoIdOf/itemFingerprint already rely on — is always
+  // present, just less precisely scoped to the thumbnail image itself.
+  const THUMB_HOST_SELECTORS = ['ytd-thumbnail', 'yt-thumbnail-view-model', '#thumbnail'];
+
+  function findThumbHost(row) {
+    for (const sel of THUMB_HOST_SELECTORS) {
+      const el = row.querySelector(sel);
+      if (el) return el;
+    }
+    return row.querySelector('a[href*="/watch"]');
+  }
+
+  let _manualBusy    = false; // guard 4/6/7: a ✕ click is resolving; blocks scan/delete
+  let _rowXBtn       = null;  // the one reusable button element
+  let _rowXRow       = null;  // which row it's currently attached to, if any
+  let _rowXThumbHost = null;  // the thumbnail host it's parented to right now
+  let _rowXBrowseEl  = null;  // the browse element carrying our delegated listeners
+
+  // Builds an <svg> via the SVG namespace rather than an innerHTML string.
+  // YouTube enforces Trusted Types (the same block that killed the blob
+  // Worker, per this project's notes) — an innerHTML string assignment is
+  // exactly the kind of sink that policy can reject outright.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  function buildSvgIcon(className, shapeTag, shapeAttrs) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', className);
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS(SVG_NS, shapeTag);
+    for (const [k, v] of Object.entries(shapeAttrs)) shape.setAttribute(k, v);
+    svg.appendChild(shape);
+    return svg;
+  }
+
+  function ensureRowXBtn() {
+    if (_rowXBtn) return _rowXBtn;
+    const btn = document.createElement('button');
+    btn.id   = 'ytc-row-x';
+    btn.type = 'button';
+    btn.dataset.ytcX = '1'; // guard 1: invisible to isMenuButton
+    btn.setAttribute('aria-label', 'Remove from watch history');
+    btn.title = 'Remove from watch history';
+    btn.appendChild(buildSvgIcon('ytc-row-x-icon', 'path', {
+      d: 'M6 6 L18 18 M18 6 L6 18', fill: 'none',
+      stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
+    }));
+    btn.appendChild(buildSvgIcon('ytc-row-x-spinner', 'circle', {
+      cx: '12', cy: '12', r: '9', fill: 'none',
+      stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
+      'stroke-dasharray': '34 20',
+    }));
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const row = _rowXRow;
+      if (row) handleRowX(row);
+    });
+    _rowXBtn = btn;
+    return btn;
+  }
+
+  function showRowXOn(row) {
+    if (_rowXRow === row) return;
+    const host = findThumbHost(row);
+    if (!host) { hideRowX(); return; }
+
+    hideRowX();
+
+    const btn = ensureRowXBtn();
+    // Guard 9: only claim position:relative if the host doesn't already have
+    // one (most YT thumbnail hosts do — they anchor the duration badge the
+    // same way), and always give it back.
+    if (getComputedStyle(host).position === 'static') {
+      host.dataset.ytcPosPatched = '1';
+      host.style.position = 'relative';
+    }
+    host.appendChild(btn);
+    btn.classList.remove('ytc-row-x-visible');
+    void btn.offsetWidth; // force reflow so the reveal transition replays per row
+    btn.classList.add('ytc-row-x-visible');
+
+    _rowXRow       = row;
+    _rowXThumbHost = host;
+  }
+
+  function hideRowX() {
+    if (_rowXBtn) {
+      _rowXBtn.classList.remove('ytc-row-x-visible');
+      if (_rowXBtn.parentElement) _rowXBtn.remove();
+    }
+    if (_rowXThumbHost && _rowXThumbHost.dataset.ytcPosPatched) {
+      _rowXThumbHost.style.position = '';
+      delete _rowXThumbHost.dataset.ytcPosPatched;
+    }
+    _rowXRow       = null;
+    _rowXThumbHost = null;
+  }
+
+  // Guard 3: a batch run owns the page. The synthetic mouseenter/mouseover it
+  // dispatches at every row would otherwise drag this button along behind it,
+  // and a manual click mid-run would fight the batch over YouTube's one shared
+  // dropdown — the exact failure closeOpenMenu()'s comment documents.
+  function handleRowPointerEvent(e) {
+    if (currentState === STATE.SCANNING || currentState === STATE.DELETING) {
+      hideRowX();
+      return;
+    }
+    const row = e.target.closest(ROW_SEL);
+    if (!row) return;
+    showRowXOn(row);
+  }
+
+  // mouseout, not mouseleave: mouseleave never bubbles, so a delegated
+  // listener using it would only fire once — when the pointer leaves the
+  // whole feed — instead of once per row.
+  function handleRowPointerLeave(e) {
+    if (!_rowXRow) return;
+    if (e.relatedTarget && _rowXRow.contains(e.relatedTarget)) return;
+    hideRowX();
+  }
+
+  function installRowHoverListeners(browseEl) {
+    if (!browseEl || _rowXBrowseEl === browseEl) return;
+    teardownRowHoverListeners();
+    browseEl.addEventListener('mouseover', handleRowPointerEvent);
+    browseEl.addEventListener('focusin',   handleRowPointerEvent);
+    browseEl.addEventListener('mouseout',  handleRowPointerLeave);
+    _rowXBrowseEl = browseEl;
+  }
+
+  // Guard 10: torn down in the same handleNav branch that removes #ytc-panel
+  // when leaving /feed/history.
+  function teardownRowHoverListeners() {
+    hideRowX();
+    if (!_rowXBrowseEl) return;
+    _rowXBrowseEl.removeEventListener('mouseover', handleRowPointerEvent);
+    _rowXBrowseEl.removeEventListener('focusin',   handleRowPointerEvent);
+    _rowXBrowseEl.removeEventListener('mouseout',  handleRowPointerLeave);
+    _rowXBrowseEl = null;
+  }
+
+  // Mirrors onScanComplete's "No items found" box: built by hand (not via
+  // insertInfo) so we keep a reference to remove it after a few seconds, and
+  // deliberately given no .ytc-info-strong child — updateDeletingProgress
+  // finds its number via "#ytc-panel .ytc-info-red .ytc-info-strong" and must
+  // never match this one-off message.
+  function showRowXFailure() {
+    const panel     = document.getElementById('ytc-panel');
+    const actionBtn = document.getElementById('ytc-action');
+    if (!panel || !actionBtn) return;
+    const msg = document.createElement('div');
+    msg.className   = 'ytc-info ytc-info-red';
+    msg.textContent = "Couldn't remove that video. Try again, or use the ⋮ menu.";
+    panel.insertBefore(msg, actionBtn);
+    setTimeout(() => msg.remove(), 3000);
+  }
+
+  // Guards 4-8 live here. This calls the same domRemoveItem() the batch loop
+  // uses and nothing else — no InnerTube fast path (guard 6), no batch
+  // counters/pacing/wake lock (guard 7).
+  async function handleRowX(row) {
+    if (_manualBusy) return; // guard 4: no overlapping manual clicks
+    // Guard 3, belt & suspenders: handleScan/handleDelete already refuse to
+    // start while _manualBusy is true, so this should be unreachable, but a
+    // click already in flight when a run starts must still be inert.
+    if (currentState === STATE.SCANNING || currentState === STATE.DELETING) return;
+
+    _manualBusy = true;
+    // Guard 5: a Cancel from an earlier run must not silently block this
+    // click — every wait helper below short-circuits on cancelRequested, and
+    // nothing else clears it once a run finishes cancelled.
+    cancelRequested = false;
+    if (_rowXBtn) {
+      _rowXBtn.disabled = true;
+      _rowXBtn.classList.add('ytc-row-x-busy');
+    }
+
+    let result;
+    try {
+      result = await domRemoveItem(row);
+    } finally {
+      _manualBusy = false;
+      if (_rowXBtn) {
+        _rowXBtn.disabled = false;
+        _rowXBtn.classList.remove('ytc-row-x-busy');
+      }
+    }
+
+    if (result.ok) {
+      // Only tidy up the button if it's still parented to the row we just
+      // removed — the user may have moved the pointer to a different row
+      // while this was resolving, and that row's button shouldn't vanish
+      // out from under them.
+      if (_rowXRow === row) hideRowX();
+
+      // Guard 8: keep a pending READY count and the batch's pacing honest.
+      // Without this, a later delete run walks into the tombstone this row
+      // just became, finds no menu button, and pays a skip *and* a backoff
+      // for a row that was already gone.
+      if (foundItems.has(row)) {
+        foundItems.delete(row);
+        if (currentState === STATE.READY) {
+          if (foundItems.size === 0) setState(STATE.IDLE);
+          else setState(STATE.READY, { count: foundItems.size });
+        }
+      }
+    } else {
+      showRowXFailure();
+    }
+  }
+
   function handleCancel() {
     if (currentState !== STATE.DELETING) return;
     cancelRequested = true;
@@ -2115,15 +2436,17 @@
     const historyPageSel = 'ytd-browse[page-subtype="history"]';
 
     if (isMobile) {
-      waitForElement(historyPageSel, () => {
+      waitForElement(historyPageSel, (browseEl) => {
         const el = document.querySelector('ytd-browse-filter-chip-bar-renderer, #secondary');
         if (el) appendPanel(el.parentElement || el, el.nextSibling);
+        installRowHoverListeners(browseEl);
       });
     } else {
-      waitForElement(historyPageSel, () => {
+      waitForElement(historyPageSel, (browseEl) => {
         const sidebar = document.querySelector('ytd-browse[page-subtype="history"] #secondary') ||
                         document.querySelector('#secondary');
         if (sidebar) appendPanel(sidebar, null);
+        installRowHoverListeners(browseEl);
       });
     }
   }
