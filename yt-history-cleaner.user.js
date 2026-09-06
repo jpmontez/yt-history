@@ -482,11 +482,21 @@
   /* Manual per-row delete button. Lives inside YouTube's own thumbnail
      markup, not the panel, and sits over an arbitrary photograph — so its
      rest state borrows the same dark scrim YouTube's own duration badge
-     uses rather than assuming anything about page background or theme. */
+     uses rather than assuming anything about page background or theme.
+
+     TOP-LEFT IS LOAD-BEARING, not an aesthetic preference. Verified on the
+     live page: YouTube's hover overlay puts "Watch later" at almost exactly
+     the box this button used to occupy on the right (ours 307-347, theirs
+     311-343), and it wins the paint order — our button came 8th of 8 in
+     elementsFromPoint at its own centre, so it was invisible AND unclickable.
+     Raising z-index does NOT fix it (tested at 60: still covered), because
+     that overlay sits in a stacking context ours can't reach from inside
+     yt-thumbnail-view-model. The left corner holds only the thumbnail image,
+     so moving there fixes both problems at the original z-index. */
   #ytc-row-x {
     position: absolute;
     top: 0;
-    right: 0;
+    left: 0;
     width: 40px;
     height: 40px;
     margin: 0;
