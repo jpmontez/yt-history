@@ -514,12 +514,23 @@
     transition: opacity 0.12s ease, transform 0.12s ease;
     z-index: 3;
   }
+  /* The scrim disc. z-index here is NOT decoration: an absolutely-positioned
+     pseudo-element paints in a later phase than static in-flow children, so
+     without an explicit order this disc covers the glyph it is supposed to sit
+     behind — the ✕ showed through at ~28% over the rest state and vanished
+     entirely under the opaque hover fill.
+     0.86 rather than the duration badge's 0.72: that value carries text at a
+     known size, this carries a thin line glyph and needs more separation. The
+     hairline ring is what keeps a dark disc from disappearing into a dark
+     thumbnail — the one case a scrim alone cannot cover. */
   #ytc-row-x::before {
     content: '';
     position: absolute;
-    inset: 6px;
+    inset: 5px;
+    z-index: 0;
     border-radius: 50%;
-    background: rgba(15, 15, 15, 0.72);
+    background: rgba(15, 15, 15, 0.86);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
     transition: background-color 0.15s ease;
   }
   #ytc-row-x.ytc-row-x-visible {
@@ -540,6 +551,8 @@
   #ytc-row-x .ytc-row-x-icon,
   #ytc-row-x .ytc-row-x-spinner {
     color: #fff;
+    position: relative;
+    z-index: 1;
   }
   #ytc-row-x .ytc-row-x-spinner {
     display: none;
@@ -2231,9 +2244,14 @@
   function buildSvgIcon(className, shapeTag, shapeAttrs) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('class', className);
+    // Rendered 1:1 against the 24-unit viewBox — no fractional downscale, so
+    // the strokes land on whole pixels. The ✕ path spans 12 of those units,
+    // giving a 12px glyph in a 30px disc: the same glyph-to-circle ratio
+    // YouTube's own hover-overlay buttons use right next to it. At 14px the
+    // icon read as visibly daintier than its neighbours.
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
     svg.setAttribute('aria-hidden', 'true');
     const shape = document.createElementNS(SVG_NS, shapeTag);
     for (const [k, v] of Object.entries(shapeAttrs)) shape.setAttribute(k, v);
@@ -2251,12 +2269,14 @@
     btn.title = 'Remove from watch history';
     btn.appendChild(buildSvgIcon('ytc-row-x-icon', 'path', {
       d: 'M6 6 L18 18 M18 6 L6 18', fill: 'none',
-      stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
+      stroke: 'currentColor', 'stroke-width': '2.5', 'stroke-linecap': 'round',
     }));
+    // r:8 keeps the busy ring inside the same optical circle the ✕ occupies,
+    // so swapping one for the other doesn't change the button's weight.
     btn.appendChild(buildSvgIcon('ytc-row-x-spinner', 'circle', {
-      cx: '12', cy: '12', r: '9', fill: 'none',
-      stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round',
-      'stroke-dasharray': '34 20',
+      cx: '12', cy: '12', r: '8', fill: 'none',
+      stroke: 'currentColor', 'stroke-width': '2.5', 'stroke-linecap': 'round',
+      'stroke-dasharray': '30 20',
     }));
     btn.addEventListener('click', (e) => {
       e.preventDefault();
