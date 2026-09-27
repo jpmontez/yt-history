@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.21
+// @version      1.22
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -1071,7 +1071,7 @@
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
 
-    panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary)').forEach(el => el.remove());
+    panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary), #ytc-refresh').forEach(el => el.remove());
 
     const busy = state === STATE.SCANNING || state === STATE.DELETING;
     if (rangeEl) rangeEl.disabled = busy;
@@ -1174,6 +1174,7 @@
   function insertRefreshButton(beforeNode) {
     const panel = document.getElementById('ytc-panel');
     const btn   = document.createElement('button');
+    btn.id             = 'ytc-refresh';
     btn.className      = 'ytc-btn ytc-btn-cancel';
     btn.textContent    = 'Refresh Page';
     btn.style.marginBottom = '8px';
@@ -1213,6 +1214,7 @@
 
   function initStateIdle() {
     foundItems      = new Set();
+    _apiCmds        = null;
     deletedCount    = 0;
     skippedCount    = 0;
     cancelRequested = false;
@@ -1315,27 +1317,28 @@
     if (currentState !== STATE.IDLE) return;
     if (_manualBusy) return; // a row's ✕ click is still resolving
     foundItems      = new Set();
+    _apiCmds        = null;
     deletedCount    = 0;
     cancelRequested = false;
 
     let filterFn;
+    let stopBefore = null;
     if (calendarMode) {
       const range = { start: selectedStart, end: selectedEnd };
       filterFn = (headerText) => isSectionInCustomRange(headerText, range);
+      if (range.end) stopBefore = range.start;
     } else {
       const cutoff = getCutoffDate();
       filterFn = (headerText) => isSectionOlderThanCutoff(headerText, cutoff);
     }
 
-    // All-time scans used to drop the pause to 200ms for speed, which risked
-    // reading a slow batch as a stall and stopping early. waitForGrowth gives
-    // the same speed without that trade, so one ceiling now serves both.
-    // Before any scrolling: continuation responses carry the tokens for every
-    // row past the first screenful, and they are only observable in flight.
-    installTokenHarvester();
     setState(STATE.SCANNING, { count: 0 });
-    acquireWakeLock();
-    scrollAndCollect(filterFn);
+    acquireWakeLock(); // synchronously off the click — see startAudioClock
+    (async () => {
+      const cmds = _apiUsable ? await apiScan(filterFn, stopBefore) : null;
+      if (cmds) { _apiCmds = cmds; onScanComplete(); }
+      else scrollAndCollect(filterFn);
+    })();
   }
 
   // Resolve as soon as the feed grows past prevHeight, or at maxMs. YouTube
@@ -1429,12 +1432,13 @@
     document.getElementById('ytc-panel')?.scrollIntoView({ block: 'start' });
     releaseWakeLock();
 
-    if (foundItems.size === 0) {
+    const count = _apiCmds ? _apiCmds.length : foundItems.size;
+    if (count === 0) {
       setState(STATE.IDLE);
       flashInfo('blue', 'No items found in this range.');
       return;
     }
-    setState(STATE.READY, { count: foundItems.size });
+    setState(STATE.READY, { count });
   }
 
   function removeNavAbort() {
@@ -1460,10 +1464,11 @@
     _confirmSeen   = 0;
     _confirmProbes = 0;
     window.addEventListener('yt-navigate-finish', _navAbortFn, { once: true });
-    const items = [...foundItems];
+    const items = _apiCmds || [...foundItems];
     setState(STATE.DELETING, { deleted: 0, total: items.length });
     acquireWakeLock();
-    deleteNext(items);
+    if (_apiCmds) runApiDelete(items);
+    else          deleteNext(items);
   }
 
   const isMenuButton = btn => {
@@ -1682,214 +1687,226 @@
   }
 
   // ---------------------------------------------------------------------------
-  // InnerTube fast path
+  // InnerTube path — scan and delete without touching the page
   //
-  // Deleting through the UI costs a scroll, a hover, a menu open, a click and a
-  // removal check per row. The menu entry those clicks eventually reach is just
-  // a POST to /youtubei/v1/feedback carrying an opaque feedbackToken, and that
-  // endpoint takes an ARRAY of tokens — so the whole run can collapse into a
-  // handful of requests.
+  // Everything the DOM path clicks through is backed by two endpoints: the
+  // history feed is /youtubei/v1/browse (browseId FEhistory, then continuation
+  // tokens), and "Remove from watch history" is a POST to /youtubei/v1/feedback
+  // carrying an opaque feedbackToken — and that endpoint takes an ARRAY of them.
+  // Neither needs a rendered row, a scroll, a hover or a timer, so a run over
+  // this path is a string of fetches that keeps going in a hidden tab, where
+  // the DOM path stalls: YouTube only loads more history as the page scrolls,
+  // and never renders a row's menu off-screen.
   //
-  // Verified against the live page (2026-09-05):
-  //   - Rows render as yt-lockup-view-model. The ELEMENT exposes no token at
-  //     all: rawProps, componentProps, _signalValues, slotProps, _signalProps
-  //     and queuingData were all searched and are empty of it. There is no
-  //     Polymer .data on these, so the token has to come from the JSON.
-  //   - In the payload it sits at
-  //       lockupViewModel -> ... -> listItemViewModel{title "Remove from watch
-  //       history"} -> rendererContext.commandContext.onTap.innertubeCommand
-  //       -> feedbackEndpoint.feedbackToken
-  //   - lockupViewModel.contentId is the videoId, which is also in the row's
-  //     /watch?v= href — that is the join between DOM row and token.
-  //   - 55/55 visible rows resolved this way, zero misses.
-  const _tokenMap = new Map();   // videoId -> { tok, ctp }
-  let _harvestInstalled = false;
-  let _apiUsable = null;         // null = unproven, true/false = measured
+  // Verified against the live page (2026-09-05): the token sits at
+  //   listItemViewModel{title "Remove from watch history"}
+  //   -> rendererContext.commandContext.onTap.innertubeCommand
+  //   -> feedbackEndpoint.feedbackToken
+  // with the command's own clickTrackingParams as a sibling of
+  // feedbackEndpoint. Walks here are uncapped on purpose (a depth cap of 14
+  // finds nothing, 25 finds a fraction) and terminate on a WeakSet.
+  //
+  // NOT yet verified live: the browse response's section/header shape, and
+  // whether /feedback accepts the request once it carries SAPISIDHASH auth.
+  // So every step fails closed — a browse response that doesn't parse drops
+  // the scan back to the DOM path, a refused delete switches this page load to
+  // the DOM path, and a deletion only counts when the server reports that
+  // token as processed.
 
-  // Find the token for the "Remove from watch history" entry specifically.
-  // Taking the first feedbackToken in the subtree is NOT safe: at page level
-  // the earliest ones belong to the sidebar's "Clear all watch history" button,
-  // and firing one of those would wipe the entire history instead of one row.
-  // Depth caps are also a trap here — this nests deeper than it looks (a cap of
-  // 14 finds nothing, 25 finds a fraction), so the walk is uncapped and relies
-  // on the WeakSet to terminate.
-  function removeCommandOfLockup(lockup) {
+  let _apiUsable = true; // false once YouTube refuses a direct delete this page load
+  let _apiCmds   = null; // the API scan's result; null means foundItems (DOM) holds the run
+
+  function cfg(key) {
+    try { return window.ytcfg && ytcfg.get(key); } catch (e) { return undefined; }
+  }
+
+  // YouTube's own InnerTube requests carry the cookie AND this header, a SHA-1
+  // over "<unix seconds> <SAPISID cookie> <origin>". Without it InnerTube can
+  // answer as if signed out, which for FEhistory means no history at all.
+  async function authHeaders() {
+    const headers = {
+      'Content-Type':    'application/json',
+      'X-Origin':        location.origin,
+      'X-Goog-AuthUser': String(cfg('SESSION_INDEX') ?? 0),
+    };
+    const pageId = cfg('DELEGATED_SESSION_ID'); // set when signed in as a brand account
+    if (pageId) headers['X-Goog-PageId'] = pageId;
+    const m = document.cookie.match(/(?:^|;\s*)(?:SAPISID|__Secure-3PAPISID)=([^;]+)/);
+    if (m && window.crypto && crypto.subtle) {
+      const ts   = Math.floor(Date.now() / 1000);
+      const buf  = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`${ts} ${m[1]} ${location.origin}`));
+      const hash = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+      headers.Authorization = `SAPISIDHASH ${ts}_${hash}`;
+    }
+    return headers;
+  }
+
+  // Resolves to the parsed JSON, or null on any failure. Callers treat null as
+  // "fall back", never as "nothing there".
+  async function innertube(endpoint, body, context = cfg('INNERTUBE_CONTEXT')) {
+    if (!context) return null;
+    const key = cfg('INNERTUBE_API_KEY');
+    try {
+      const res = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false` + (key ? '&key=' + encodeURIComponent(key) : ''), {
+        method:      'POST',
+        credentials: 'include',
+        headers:     await authHeaders(),
+        body:        JSON.stringify({ context, ...body }),
+      });
+      return res.ok ? await res.json() : null;
+    } catch (e) { return null; }
+  }
+
+  function textOf(t) {
+    if (!t) return '';
+    if (typeof t === 'string') return t;
+    return t.content || t.simpleText || (Array.isArray(t.runs) ? t.runs.map(r => r.text).join('') : '');
+  }
+
+  // Prefer the innertubeCommand itself: it carries the token in
+  // .feedbackEndpoint AND its own clickTrackingParams as a sibling, so one
+  // match yields both halves of the request.
+  function feedbackCommandIn(root) {
     let found = null;
     const seen = new WeakSet();
-    (function walk(x) {
-      if (found || !x || typeof x !== 'object' || seen.has(x)) return;
-      seen.add(x);
-      const li = x.listItemViewModel;
-      if (li && li.title && typeof li.title.content === 'string' &&
-          /remove from watch history/i.test(li.title.content)) {
-        const inner = new WeakSet();
-        (function dig(y) {
-          if (found || !y || typeof y !== 'object' || inner.has(y)) return;
-          inner.add(y);
-          // Prefer the innertubeCommand itself: it carries the token in
-          // .feedbackEndpoint AND its own clickTrackingParams as a sibling, so
-          // one match yields both halves of the request.
-          if (y.feedbackEndpoint && typeof y.feedbackEndpoint.feedbackToken === 'string') {
-            found = { tok: y.feedbackEndpoint.feedbackToken,
-                      ctp: typeof y.clickTrackingParams === 'string' ? y.clickTrackingParams : null };
-            return;
-          }
-          // Fallback for a shape that hangs the token somewhere else; the
-          // request still goes out, just without clickTracking.
-          if (typeof y.feedbackToken === 'string') { found = { tok: y.feedbackToken, ctp: null }; return; }
-          for (const k of Object.keys(y)) { try { dig(y[k]); } catch (e) {} }
-        })(li);
-        if (found) return;
+    (function dig(y) {
+      if (found || !y || typeof y !== 'object' || seen.has(y)) return;
+      seen.add(y);
+      if (y.feedbackEndpoint && typeof y.feedbackEndpoint.feedbackToken === 'string') {
+        found = { tok: y.feedbackEndpoint.feedbackToken,
+                  ctp: typeof y.clickTrackingParams === 'string' ? y.clickTrackingParams : null };
+        return;
       }
-      for (const k of Object.keys(x)) { try { walk(x[k]); } catch (e) {} }
-    })(lockup);
+      for (const k of Object.keys(y)) dig(y[k]);
+    })(root);
     return found;
   }
 
-  function harvestTokens(root) {
-    if (!root || typeof root !== 'object') return;
-    const seen = new WeakSet();
-    (function walk(o) {
-      if (!o || typeof o !== 'object' || seen.has(o)) return;
-      seen.add(o);
-      const lk = o.lockupViewModel;
-      if (lk && lk.contentId && !_tokenMap.has(lk.contentId)) {
-        const c = removeCommandOfLockup(lk);
-        if (c) _tokenMap.set(lk.contentId, c);
+  // Every "Remove from watch history" command in a subtree: one per history
+  // row, Shorts included. Matching on that label is load-bearing — at page
+  // level the first feedbackTokens belong to the sidebar's "Clear all watch
+  // history" button, and firing one of those wipes the ENTIRE history.
+  function removeCommandsIn(root) {
+    const found = [];
+    const seen  = new WeakSet();
+    (function walk(x) {
+      if (!x || typeof x !== 'object' || seen.has(x)) return;
+      seen.add(x);
+      if (/remove from watch history/i.test(textOf(x.title || x.text))) {
+        const cmd = feedbackCommandIn(x);
+        if (cmd) { found.push(cmd); return; }
       }
-      for (const k of Object.keys(o)) { try { walk(o[k]); } catch (e) {} }
+      for (const k of Object.keys(x)) walk(x[k]);
     })(root);
+    return found;
   }
 
-  // ytInitialData only covers the first screenful. Everything the scan scrolls
-  // to arrives in /youtubei/v1/browse continuations, so the harvester has to be
-  // in place BEFORE scrolling or most rows will have no token. The wrapper
-  // never alters the request or the returned promise — it clones the response
-  // and reads it on the side, so a failure here cannot break the page.
-  function installTokenHarvester() {
-    if (_harvestInstalled) return;
-    _harvestInstalled = true;
-    try { harvestTokens(window.ytInitialData); } catch (e) {}
-    const origFetch = window.fetch;
-    if (typeof origFetch !== 'function') return;
-    window.fetch = function (...args) {
-      const promise = origFetch.apply(this, args);
-      try {
-        const req = args[0];
-        const url = typeof req === 'string' ? req : (req && req.url) || '';
-        if (/\/youtubei\/v1\/(browse|next)/.test(url)) {
-          promise.then(res => {
-            try {
-              res.clone().json().then(j => { try { harvestTokens(j); } catch (e) {} }, () => {});
-            } catch (e) {}
-          }, () => {});
+  // Page through the whole history feed, keeping the remove command of every
+  // row in a dated section that passes filterFn. Resolves to those commands,
+  // or null if a response isn't the shape expected. History is newest-first,
+  // so paging stops early once a section is older than stopBefore (if given).
+  async function apiScan(filterFn, stopBefore) {
+    const byTok = new Map();
+    let sawSection = false;
+    let unreadable = false;
+    let json = await innertube('browse', { browseId: 'FEhistory' });
+
+    while (json) {
+      let next = null;
+      let stop = false;
+      const seen = new WeakSet();
+      (function walk(x) {
+        if (!x || typeof x !== 'object' || seen.has(x)) return;
+        seen.add(x);
+        const sec = x.itemSectionRenderer;
+        if (sec) {
+          // Same rule as the DOM scan: a section without a parseable date
+          // header is never a history day, whatever the filter says.
+          const hdr    = sec.header && sec.header.itemSectionHeaderRenderer;
+          const header = textOf(hdr && hdr.title).trim();
+          const date   = header && parseSectionDate(header);
+          if (date) {
+            sawSection = true;
+            if (stopBefore && date < stopBefore) stop = true;
+            else if (filterFn(header)) {
+              const cmds = removeCommandsIn(sec.contents);
+              // A history day always has a row. One with no remove command
+              // means the tokens moved somewhere this walk doesn't look —
+              // report "not understood", not "nothing to delete".
+              if (!cmds.length) unreadable = true;
+              for (const cmd of cmds) byTok.set(cmd.tok, cmd);
+            }
+            return;
+          }
         }
-      } catch (e) {}
-      return promise;
-    };
+        const cont = x.continuationItemRenderer;
+        const tok  = cont && cont.continuationEndpoint && cont.continuationEndpoint.continuationCommand &&
+                     cont.continuationEndpoint.continuationCommand.token;
+        if (tok) next = tok;
+        for (const k of Object.keys(x)) walk(x[k]);
+      })(json);
+
+      if (!sawSection || unreadable) return null;
+      updateScanningCount(byTok.size);
+      if (stop || !next) return [...byTok.values()];
+      json = await innertube('browse', { continuation: next });
+    }
+    return null; // a continuation failed mid-feed: the result would be partial
   }
 
-  function videoIdOf(item) {
-    const a = item.querySelector('a[href*="/watch"]');
-    const m = a && (a.getAttribute('href') || '').match(/[?&]v=([^&]+)/);
-    return m ? m[1] : null;
+  // Resolves to how many tokens the server reports processed, or -1 if the
+  // call failed or carries no per-token verdict. HTTP 200 alone is not proof.
+  async function apiDeleteBatch(cmds) {
+    const context = cfg('INNERTUBE_CONTEXT');
+    const ctp     = cmds[0].ctp;
+    // ytcfg's context has no clickTracking, and /feedback answered 400 without
+    // the params of the very menu command the token came from.
+    const json = await innertube('feedback', {
+      feedbackTokens:             cmds.map(c => c.tok),
+      isFeedbackTokenUnencrypted: false,
+      shouldMerge:                false,
+    }, ctp && context ? { ...context, clickTracking: { clickTrackingParams: ctp } } : context);
+    const verdicts = json && json.feedbackResponses;
+    return Array.isArray(verdicts) ? verdicts.filter(v => v && v.isProcessed).length : -1;
   }
 
-  // One POST, many tokens. Resolves to the number the server reported as
-  // processed, or -1 if the call itself failed (auth, shape, network) so the
-  // caller can fall back to the DOM rather than silently counting nothing.
-  async function apiDeleteBatch(tokens, clickTrackingParams) {
-    let key, context;
-    try {
-      key     = window.ytcfg && ytcfg.get('INNERTUBE_API_KEY');
-      context = window.ytcfg && ytcfg.get('INNERTUBE_CONTEXT');
-    } catch (e) { return -1; }
-    if (!key || !context) return -1;
-
-    let res;
-    try {
-      res = await fetch('/youtubei/v1/feedback?key=' + encodeURIComponent(key) + '&prettyPrint=false', {
-        method:      'POST',
-        credentials: 'include',
-        headers:     { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // The top-level envelope below was already correct — a hand-captured
-          // request from YouTube's own UI carries exactly these four keys with
-          // these two boolean values. What the first attempt got HTTP 400
-          // "Request contains an invalid argument" for was the CONTEXT:
-          // ytcfg's INNERTUBE_CONTEXT has no clickTracking, and the endpoint
-          // wants the clickTrackingParams belonging to the very menu command
-          // the token came from. Harvested together in removeCommandOfLockup.
-          context: clickTrackingParams
-            ? Object.assign({}, context, { clickTracking: { clickTrackingParams } })
-            : context,
-          feedbackTokens:            tokens,
-          isFeedbackTokenUnencrypted: false,
-          shouldMerge:                false,
-        }),
-      });
-    } catch (e) { return -1; }
-    if (!res.ok) return -1;
-
-    let json;
-    try { json = await res.json(); } catch (e) { return -1; }
-    const responses = json && json.feedbackResponses;
-    if (!Array.isArray(responses)) {
-      // No per-token breakdown. Trust it only if the request itself succeeded.
-      return json && json.responseContext ? tokens.length : -1;
-    }
-    return responses.filter(r => r && r.isProcessed).length;
-  }
-
-  // Delete everything we hold a token for, and return the rows that still need
-  // the DOM path. The first row goes out ALONE and is confirmed against the DOM
-  // before anything is batched: an endpoint that answers 200 while changing
-  // nothing would otherwise burn the whole queue reporting a clean run over
-  // history that is still there — the exact failure v1.16 was written to stop.
-  async function deleteViaApi(items, total) {
-    if (!items.length) return items;
-
-    const pending = [];
-    for (const item of items) {
-      const id  = item.isConnected ? videoIdOf(item) : null;
-      const cmd = id && _tokenMap.get(id);
-      if (cmd) pending.push({ item, tok: cmd.tok, ctp: cmd.ctp });
-    }
-    if (!pending.length) return items;
-
-    const done = new Set();
-
-    if (_apiUsable === null) {
-      const probe       = pending[0];
-      const fingerprint = itemFingerprint(probe.item);
-      const processed   = await apiDeleteBatch([probe.tok], probe.ctp);
-      if (processed === 1 && await waitForRemoval(probe.item, fingerprint, 3000)) {
-        _apiUsable = true;
-        done.add(probe.item);
-        deletedCount++;
-        updateDeletingProgress(deletedCount, total, skippedCount);
-      } else {
-        // Either the call failed or the row outlived it. Either way the fast
-        // path is not trustworthy on this account today — hand everything back.
-        _apiUsable = false;
-        return items;
-      }
-    }
-    if (_apiUsable !== true) return items;
-
+  // The first token goes out alone, so a request shape YouTube refuses costs
+  // one row's worth of nothing instead of a batch reported as a clean run.
+  // Resolves false only if that very first request was refused.
+  async function deleteViaApi(cmds) {
+    const total = cmds.length;
     const BATCH = 50;
-    const rest  = pending.filter(p => !done.has(p.item));
-    for (let i = 0; i < rest.length; i += BATCH) {
-      if (cancelRequested) break;
-      const slice     = rest.slice(i, i + BATCH);
-      const processed = await apiDeleteBatch(slice.map(p => p.tok), slice[0].ctp);
-      if (processed < 0) break;                 // fall back for the remainder
-      for (const p of slice) done.add(p.item);
-      deletedCount += Math.min(processed, slice.length);
+    for (let i = 0; i < total && !cancelRequested; ) {
+      const slice     = cmds.slice(i, i === 0 ? 1 : i + BATCH);
+      const processed = await apiDeleteBatch(slice);
+      if (i === 0 && processed <= 0) return false;
+      if (processed < 0) {             // failed mid-run: count the rest as skipped
+        skippedCount += total - i;
+        updateDeletingProgress(deletedCount, total, skippedCount);
+        break;
+      }
+      deletedCount += processed;
+      skippedCount += slice.length - processed;
+      i += slice.length;
       updateDeletingProgress(deletedCount, total, skippedCount);
     }
+    return true;
+  }
 
-    return items.filter(it => !done.has(it));
+  async function runApiDelete(cmds) {
+    const ok = await deleteViaApi(cmds);
+    removeNavAbort();
+    releaseWakeLock();
+    if (!ok) {
+      _apiUsable = false;
+      _apiCmds   = null;
+      setState(STATE.IDLE);
+      insertInfo(document.getElementById('ytc-action'), 'red',
+        'YouTube refused the direct delete.', 'Scan again to use page mode');
+      return;
+    }
+    if (cancelRequested) setState(STATE.CANCELLED, { deleted: deletedCount, skipped: skippedCount });
+    else                 setState(STATE.DONE,      { count: deletedCount, skipped: skippedCount });
   }
 
   // The click sequence for one row: hover -> open its ⋮ menu -> click "Remove
@@ -1965,10 +1982,7 @@
       }
     };
 
-    // Fast path first; whatever it could not resolve falls through to the DOM
-    // loop below, which stays exactly as it was.
     const total = items.length;
-    items = await deleteViaApi(items, total);
 
     for (let i = 0; i < items.length; i++) {
       if (!items[i].isConnected) {
@@ -2053,7 +2067,7 @@
   const ROW_SEL = 'yt-lockup-view-model, ytd-video-renderer';
 
   // Tried in order; the first match hosts the button. The fallback — the same
-  // watch-page anchor videoIdOf/itemFingerprint already rely on — is always
+  // watch-page anchor itemFingerprint already relies on — is always
   // present, just less precisely scoped to the thumbnail image itself.
   const THUMB_HOST_SELECTORS = ['ytd-thumbnail', 'yt-thumbnail-view-model', '#thumbnail'];
 
@@ -2218,7 +2232,7 @@
   }
 
   // Guards 4-8 live here. This calls the same domRemoveItem() the batch loop
-  // uses and nothing else — no InnerTube fast path (guard 6), no batch
+  // uses and nothing else — no InnerTube path (guard 6), no batch
   // counters/pacing/wake lock (guard 7).
   async function handleRowX(row) {
     if (_manualBusy) return; // guard 4: no overlapping manual clicks
