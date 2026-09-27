@@ -1706,12 +1706,15 @@
   // feedbackEndpoint. Walks here are uncapped on purpose (a depth cap of 14
   // finds nothing, 25 finds a fraction) and terminate on a WeakSet.
   //
-  // NOT yet verified live: the browse response's section/header shape, and
-  // whether /feedback accepts the request once it carries SAPISIDHASH auth.
-  // So every step fails closed — a browse response that doesn't parse drops
-  // the scan back to the DOM path, a refused delete switches this page load to
-  // the DOM path, and a deletion only counts when the server reports that
-  // token as processed.
+  // Verified live (2026-09-26, hidden tab): FEhistory sections carry their date
+  // at header.itemSectionHeaderRenderer.title, rows mix lockupViewModel and
+  // legacy videoRenderer (Shorts) and both yield exactly one remove command,
+  // and /feedback with SAPISIDHASH auth returns isProcessed: true and the row
+  // is gone on re-fetch. NOT yet seen live: a continuation page (that history
+  // fit in one response). Every step still fails closed — a browse response
+  // that doesn't parse drops the scan back to the DOM path, a refused delete
+  // switches this page load to the DOM path, and a deletion only counts when
+  // the server reports that token as processed.
 
   let _apiUsable = true; // false once YouTube refuses a direct delete this page load
   let _apiCmds   = null; // the API scan's result; null means foundItems (DOM) holds the run
