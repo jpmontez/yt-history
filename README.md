@@ -1,88 +1,88 @@
 # YT History Cleaner
 
-A userscript for [Tampermonkey](https://www.tampermonkey.net/) (or any compatible userscript manager) that adds a control panel to YouTube's Watch History page for bulk-deleting entries older than a chosen time range, or within a specific date range.
+A userscript that adds a control panel to YouTube's Watch History page for bulk-deleting entries before a chosen cutoff, or within a specific date range.
 
-Uses your normal YouTube session — no API keys, no external dependencies. It talks to YouTube's own internal API directly where it can, so a run keeps going with the tab in the background, and falls back to clicking through the page where it can't.
+It uses your normal signed-in YouTube session — no API keys, no accounts, nothing to configure. It talks to YouTube's own internal API directly, so a scan takes seconds and a deletion keeps running with the tab in the background.
 
 ---
 
 ## Installation
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser (Chrome, Firefox, Edge, Safari).
-2. Click the Tampermonkey icon → **Create a new script**.
-3. Replace the default contents with the contents of [`yt-history-cleaner.user.js`](yt-history-cleaner.user.js).
-4. Save (`Ctrl+S` / `Cmd+S`).
-5. Navigate to [youtube.com/feed/history](https://www.youtube.com/feed/history) — the panel appears automatically.
+**Safari:** install the [Userscripts](https://apps.apple.com/us/app/userscripts/id1463298887) app and enable its extension in Safari's settings, then add [`yt-history-cleaner.user.js`](yt-history-cleaner.user.js) as a new script and allow it on youtube.com.
 
-> **Safari users:** Use the [Userscripts](https://apps.apple.com/us/app/userscripts/id1463298887) app instead of Tampermonkey.
+**Chrome, Firefox, Edge:** install [Tampermonkey](https://www.tampermonkey.net/), click its icon → **Create a new script**, replace the default contents with [`yt-history-cleaner.user.js`](yt-history-cleaner.user.js), and save.
+
+Then open [youtube.com/feed/history](https://www.youtube.com/feed/history) — the panel appears automatically.
+
+Tested on Safari 27 with Userscripts 4.8.6, and on Chrome.
 
 ---
 
 ## Usage
 
-The panel appears in the sidebar on desktop, or above the video feed on mobile.
+The panel appears in the sidebar, or above the video feed in narrow windows.
 
 1. Choose a mode using the **Quick / Custom Date** control at the top of the panel.
-   - **Quick:** Pick a preset time range from the dropdown (e.g. "1 month" = delete everything older than 30 days).
-   - **Custom Date:** Use the calendar picker to select an exact date or date range (see [Custom Date Picker](#custom-date-picker) below).
-2. Click **Scan** — the script pages through your whole history and shows a live count of matching entries.
-3. Once scanning is complete, click **Delete N items** to begin deletion.
-4. A progress bar and live ETA track the deletion. You can switch to another tab while it runs.
-5. When finished, a green confirmation shows how many items were deleted. Click **Refresh Page** to reload and see the changes.
+   - **Quick:** pick a preset from the dropdown (see [Time Range Options](#time-range-options)).
+   - **Custom Date:** pick an exact date or date range on the calendar (see [Custom Date Picker](#custom-date-picker)).
+2. Click **Scan**. The script reads your history and shows how many entries match — in seconds for most histories, without scrolling the page.
+3. Click **Delete N items** to start. A progress bar and ETA track the run, and you can switch to another tab or window while it works. Click **Cancel** to stop early; anything already deleted stays deleted.
+4. When it finishes, a green confirmation shows how many entries were deleted (and how many were skipped, if any). The history page itself doesn't update on its own — click **Refresh Page** to see the result, or **Scan Again** to start over.
 
-**Removing a single video:** Hover (or tab to) any thumbnail in the feed and a **✕** appears in its top-left corner — click it to remove just that video, without opening YouTube's own menu. It's disabled while a scan or batch deletion is running.
+**Removing a single video:** hover (or tab to) any thumbnail in the feed and a **✕** appears in its top-left corner — click it to remove just that video without opening YouTube's own menu. It's disabled while a scan or deletion is running.
 
 ---
 
 ## Time Range Options
 
-| Option   | Deletes history older than |
-|----------|---------------------------|
-| 1 day    | 24 hours ago              |
-| 3 days   | 72 hours ago              |
-| 1 week   | 7 days ago                |
-| 2 weeks  | 14 days ago               |
-| 1 month  | 30 days ago               |
-| 3 months | 90 days ago               |
-| 6 months | 180 days ago              |
-| All time | Everything                |
+Presets work in whole calendar days, counted back from today. Each one deletes everything watched **on or before** that day.
 
-Changing the dropdown after a scan resets the panel back to Idle, so you can re-scan with the new range.
+| Option   | Deletes entries watched on or before |
+|----------|--------------------------------------|
+| 1 day    | Yesterday                            |
+| 3 days   | 3 days ago                           |
+| 1 week   | 7 days ago                           |
+| 2 weeks  | 14 days ago                          |
+| 1 month  | 30 days ago                          |
+| 3 months | 90 days ago                          |
+| 6 months | 180 days ago                         |
+| All time | Everything, including today          |
+
+Changing the dropdown after a scan resets the panel, so you can re-scan with the new range.
 
 ---
 
 ## Custom Date Picker
 
-Select **Custom Date** in the mode control at the top of the panel to open the calendar widget.
+Select **Custom Date** in the mode control at the top of the panel to open the calendar.
 
-- **Single date:** Click one date — deletes everything older than that date (same semantics as the preset options, but with an exact cutoff you choose). The Scan button activates immediately.
-- **Date range:** Click a start date, then a second date — order doesn't matter, the earlier date always becomes the start. Everything within that window (inclusive) is queued for deletion. The summary shows the span, day count, and a **× Clear** button to reset.
-- **Reset:** Clicking a third date resets the selection and starts over with that date as a new single selection.
+- **Single date:** click one date to delete that day and everything before it. The Scan button activates immediately.
+- **Date range:** click a start date, then an end date — order doesn't matter, the earlier one always becomes the start. Everything watched within that window, both ends included, is deleted. The summary shows the span, the number of days, and a **× Clear** button.
+- **Start over:** clicking a third date starts a new selection from that date.
 
-Switching back to **Quick** mode clears the calendar selection and re-enables the preset dropdown.
-
-Use **‹** / **›** in the calendar header to navigate between months. Future dates and the current month's "next" arrow are automatically disabled.
+Switching back to **Quick** clears the calendar selection. Use **‹** / **›** to move between months; future dates can't be selected.
 
 ---
 
 ## How It Works
 
-Entries are matched against YouTube's section date headers ("Today", "Yesterday", day names, "Month Day") and collected if they fall within the selected range — either a preset cutoff or a custom date/date range. Both Shorts and regular video entries are handled.
+YouTube groups your history under date headings ("Today", "Yesterday", weekday names, "Sep 7", …). The script reads each heading as a date and keeps every entry under a heading that falls in your range — regular videos and Shorts alike.
 
-**API mode (default).** The scan requests the history feed straight from YouTube's internal API (`/youtubei/v1/browse`, the same calls the page makes as you scroll), and picks up each entry's "Remove from watch history" token. Deletion sends those tokens to `/youtubei/v1/feedback` in batches of 50 — the first one alone, as a probe. Nothing is scrolled, clicked or timed, so the tab can sit in the background for the whole run, and even a long history takes minutes rather than hours. A deletion only counts when YouTube reports it as processed.
+**API mode (the default).** The scan fetches your history straight from YouTube's internal API (`/youtubei/v1/browse` — the same requests the page makes as you scroll) and collects each entry's "Remove from watch history" token. A date-range scan stops as soon as it reaches entries older than the range. Deleting sends those tokens to `/youtubei/v1/feedback`: the first on its own as a check, then the rest in batches of 50. Nothing is scrolled or clicked and nothing waits on timers, so the run carries on when the tab is in the background. An entry only counts as deleted once YouTube confirms it.
 
-**Page mode (fallback).** If the API response isn't recognised, the scan auto-scrolls the page instead; if YouTube refuses the direct delete, the panel says so and the next scan uses page mode. Page mode works through the UI the way you would by hand — scroll each entry into view, open its "More actions" menu, click "Remove from watch history" — so it needs the tab in the foreground.
+**Page mode (the fallback).** If YouTube's response isn't in a shape the script recognises, the scan falls back to scrolling the page, and deletion clicks through each entry the way you would by hand: scroll it into view, open its **More actions** menu, choose **Remove from watch history**. This is much slower and needs the tab in the foreground. If YouTube ever refuses the direct delete, nothing is deleted and the panel shows *"YouTube refused the direct delete"*. Click **Scan** again to redo the run in page mode.
+
+All requests go to youtube.com with your existing session. The only other request is for the panel's font, from Google Fonts.
 
 ---
 
 ## Limitations
 
-- **Needs the tab open:** API mode runs in a background tab, but a userscript only runs while some YouTube tab is open — closing the tab or navigating it away from history stops the run.
-- **Tied to YouTube internals:** YouTube periodically changes its page structure and internal API. If the script stops working, the selectors or response parsing may need updating.
-- **English only:** section dates and the "Remove from watch history" label are matched in English.
-- **No undo:** Deletions are permanent. There is no built-in confirmation prompt — the count shown before deletion is the only warning.
-- **Page mode is slow:** when it falls back to page mode, deletion is paced per item and needs the tab in the foreground.
-- **Personal use only:** This script is not packaged as a browser extension and has no automated update mechanism.
+- **Keep the tab open:** API mode runs in a background tab, but the script only runs while that tab is open. Closing it, or navigating it to another YouTube page, stops the run.
+- **Tied to YouTube internals:** YouTube changes its page and internal API from time to time. If the script stops working, its selectors or response parsing may need updating. It falls back to page mode where it can.
+- **English only:** date headings and the "Remove from watch history" label are matched in English.
+- **No undo:** deletions are permanent, and there is no confirmation prompt — the count on the **Delete N items** button is the only warning.
+- **Personal use:** this isn't packaged as a browser extension and doesn't update itself; to update, replace the script's contents with the latest version.
 
 ---
 
