@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT History Cleaner
 // @namespace    https://github.com/jmontez
-// @version      1.22
+// @version      1.23
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -1719,8 +1719,24 @@
   let _apiUsable = true; // false once YouTube refuses a direct delete this page load
   let _apiCmds   = null; // the API scan's result; null means foundItems (DOM) holds the run
 
+  // Safari's Userscripts app runs this script in the extension's isolated
+  // world whenever YouTube's CSP blocks page injection, and window.ytcfg does
+  // not exist there. The same values sit in the page's inline
+  // ytcfg.set({...}) block, which every world can read — checked equal to
+  // the live ytcfg for every key used here.
+  let _htmlCfg = null;
   function cfg(key) {
-    try { return window.ytcfg && ytcfg.get(key); } catch (e) { return undefined; }
+    try { if (window.ytcfg) return ytcfg.get(key); } catch (e) {}
+    if (!_htmlCfg) {
+      const found = {};
+      for (const s of document.querySelectorAll('script:not([src])')) {
+        for (const m of s.textContent.matchAll(/ytcfg\.set\((\{.*?\})\);/gs)) {
+          try { Object.assign(found, JSON.parse(m[1])); } catch (e) {}
+        }
+      }
+      if (Object.keys(found).length) _htmlCfg = found;
+    }
+    return _htmlCfg ? _htmlCfg[key] : undefined;
   }
 
   // YouTube's own InnerTube requests carry the cookie AND this header, a SHA-1
@@ -1750,7 +1766,7 @@
     if (!context) return null;
     const key = cfg('INNERTUBE_API_KEY');
     try {
-      const res = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false` + (key ? '&key=' + encodeURIComponent(key) : ''), {
+      const res = await fetch(`${location.origin}/youtubei/v1/${endpoint}?prettyPrint=false` + (key ? '&key=' + encodeURIComponent(key) : ''), {
         method:      'POST',
         credentials: 'include',
         headers:     await authHeaders(),
