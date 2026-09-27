@@ -39,13 +39,10 @@
 
     handleNav();
 
-    // Listen on both document and window — YT dispatches custom events on
-    // document.documentElement, which bubble to both, but some pages/extensions
-    // can interfere with one or the other.
-    document.addEventListener('yt-navigate-finish',   handleNav);
-    document.addEventListener('yt-page-data-updated', handleNav);
-    window.addEventListener('yt-navigate-finish',     handleNav);
-    window.addEventListener('yt-page-data-updated',   handleNav);
+    // YT dispatches these on document.documentElement; they bubble to window.
+    // The URL poll below covers anything that stops them getting there.
+    window.addEventListener('yt-navigate-finish',   handleNav);
+    window.addEventListener('yt-page-data-updated', handleNav);
 
     // Fallback: detect SPA URL changes via polling in case YT events don't
     // fire as expected for this transition. A subtree MutationObserver was
@@ -72,23 +69,65 @@
 
   const STYLES = `
   #ytc-panel {
+    --ytc-bg:          #fff;
+    --ytc-border:      #e0e0e0;
+    --ytc-shadow:      0 1px 4px rgba(0,0,0,0.08);
+    --ytc-title:       #0f0f0f;
+    --ytc-text:        #202124;
+    --ytc-muted:       #5f6368;
+    --ytc-subtle:      #80868b;
+    --ytc-faint:       #ccc;
+    --ytc-seg-bg:      #f8f9fa;
+    --ytc-field-bg:    #fff;
+    --ytc-cal-bg:      #fafafa;
+    --ytc-hover:       #f1f3f4;
+    --ytc-disabled:    #ccc;
+    --ytc-track:       rgba(0,0,0,0.12);
+    --ytc-blue:        #1a73e8;
+    --ytc-blue-soft:   #e8f0fe;
+    --ytc-red:         #d93025;
+    --ytc-red-soft:    #fce8e6;
+    --ytc-green:       #188038;
+    --ytc-green-soft:  #e6f4ea;
     font-family: 'DM Sans', 'Roboto', sans-serif;
-    background: #fff;
-    border: 1px solid #e0e0e0;
+    background: var(--ytc-bg);
+    border: 1px solid var(--ytc-border);
     border-radius: 12px;
     padding: 14px;
     margin: 12px 60px 12px 40px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    box-shadow: var(--ytc-shadow);
     box-sizing: border-box;
     position: sticky;
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     z-index: 1;
   }
+  html[dark] #ytc-panel {
+    --ytc-bg:          #212121;
+    --ytc-border:      #3d3d3d;
+    --ytc-shadow:      0 1px 6px rgba(0,0,0,0.4);
+    --ytc-title:       #f1f1f1;
+    --ytc-text:        #e8e8e8;
+    --ytc-muted:       #aaa;
+    --ytc-subtle:      #666;
+    --ytc-faint:       #555;
+    --ytc-seg-bg:      #2d2d2d;
+    --ytc-field-bg:    #2d2d2d;
+    --ytc-cal-bg:      #1a1a1a;
+    --ytc-hover:       #333;
+    --ytc-disabled:    #444;
+    --ytc-track:       rgba(255,255,255,0.12);
+    --ytc-blue:        #8ab4f8;
+    --ytc-blue-soft:   #1a3a6e;
+    --ytc-red:         #f28b82;
+    --ytc-red-soft:    #4a1a17;
+    --ytc-green:       #81c995;
+    --ytc-green-soft:  #1a3d26;
+  }
   #ytc-panel .ytc-title {
     font-size: 11px;
     font-weight: 700;
-    color: #0f0f0f;
+    color: var(--ytc-title);
     letter-spacing: 0.5px;
     margin-bottom: 10px;
     text-transform: uppercase;
@@ -102,7 +141,7 @@
   }
   #ytc-panel .ytc-seg {
     display: flex;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--ytc-border);
     border-radius: 8px;
     overflow: hidden;
     margin-bottom: 10px;
@@ -110,18 +149,18 @@
   #ytc-panel .ytc-seg-btn {
     flex: 1;
     border: none;
-    background: #f8f9fa;
+    background: var(--ytc-seg-bg);
     padding: 6px 4px;
     font-size: 11px;
     font-weight: 500;
     font-family: 'DM Sans', 'Roboto', sans-serif;
     cursor: pointer;
-    color: #5f6368;
+    color: var(--ytc-muted);
     transition: background 0.15s ease, color 0.15s ease;
     line-height: 1;
   }
   #ytc-panel .ytc-seg-btn:not(:last-child) {
-    border-right: 1px solid #e0e0e0;
+    border-right: 1px solid var(--ytc-border);
   }
   #ytc-panel .ytc-seg-btn.active {
     background: #1557b0;
@@ -134,19 +173,19 @@
   }
   #ytc-panel .ytc-label {
     font-size: 11px;
-    color: #5f6368;
+    color: var(--ytc-muted);
     margin-bottom: 4px;
   }
   #ytc-panel select {
     width: 100%;
     font-size: 12px;
     font-family: 'DM Sans', 'Roboto', sans-serif;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--ytc-border);
     border-radius: 6px;
     padding: 5px 8px;
     margin-bottom: 10px;
-    color: #202124;
-    background: #fff;
+    color: var(--ytc-text);
+    background: var(--ytc-field-bg);
     cursor: pointer;
   }
   #ytc-panel select:disabled {
@@ -172,7 +211,7 @@
     transform: scale(0.98);
   }
   #ytc-panel .ytc-btn:disabled {
-    background: #ccc !important;
+    background: var(--ytc-disabled) !important;
     color: #fff;
     cursor: not-allowed;
   }
@@ -180,8 +219,8 @@
   #ytc-panel .ytc-btn-red    { background: #d93025; color: #fff; }
   #ytc-panel .ytc-btn-cancel {
     background: transparent;
-    color: #5f6368;
-    border: 1px solid #dadce0;
+    color: var(--ytc-muted);
+    border: 1px solid var(--ytc-border);
   }
   #ytc-panel .ytc-info {
     border-radius: 6px;
@@ -190,27 +229,21 @@
     margin-bottom: 8px;
     font-size: 12px;
   }
-  #ytc-panel .ytc-info-blue  { background: #e8f0fe; color: #1a73e8; }
-  #ytc-panel .ytc-info-red   { background: #fce8e6; color: #d93025; }
-  #ytc-panel .ytc-info-green { background: #e6f4ea; color: #188038; }
+  #ytc-panel .ytc-info-blue  { background: var(--ytc-blue-soft);  color: var(--ytc-blue); }
+  #ytc-panel .ytc-info-red   { background: var(--ytc-red-soft);   color: var(--ytc-red); }
+  #ytc-panel .ytc-info-green { background: var(--ytc-green-soft); color: var(--ytc-green); }
   #ytc-panel .ytc-info-strong {
     display: block;
     font-size: 13px;
     font-weight: 700;
     margin-top: 2px;
   }
-  #ytc-panel .ytc-hint {
-    font-size: 10px;
-    color: #80868b;
-    text-align: center;
-    margin-bottom: 8px;
-  }
   #ytc-panel .ytc-calendar {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--ytc-border);
     border-radius: 8px;
     padding: 8px;
     margin-bottom: 8px;
-    background: #fafafa;
+    background: var(--ytc-cal-bg);
   }
   #ytc-panel .ytc-cal-header {
     display: flex;
@@ -220,7 +253,7 @@
   }
   #ytc-panel .ytc-cal-nav {
     font-size: 14px;
-    color: #5f6368;
+    color: var(--ytc-muted);
     cursor: pointer;
     border: none;
     background: none;
@@ -229,7 +262,7 @@
     transition: color 0.15s ease;
   }
   #ytc-panel .ytc-cal-nav:hover:not(:disabled) {
-    color: #1a73e8;
+    color: var(--ytc-blue);
   }
   #ytc-panel .ytc-cal-nav:disabled {
     opacity: 0.3;
@@ -238,7 +271,7 @@
   #ytc-panel .ytc-cal-month {
     font-size: 11px;
     font-weight: 600;
-    color: #202124;
+    color: var(--ytc-text);
   }
   #ytc-panel .ytc-cal-grid {
     display: grid;
@@ -249,7 +282,7 @@
   }
   #ytc-panel .ytc-cal-dh {
     font-size: 9px;
-    color: #80868b;
+    color: var(--ytc-subtle);
     padding: 1px 0;
   }
   #ytc-panel .ytc-cal-cell {
@@ -261,21 +294,21 @@
     justify-content: center;
     cursor: pointer;
     border-radius: 50%;
-    color: #202124;
+    color: var(--ytc-text);
     transition: background 0.1s ease;
     position: relative;
   }
   #ytc-panel .ytc-cal-cell:hover:not(.spillover):not(.future):not(.cell-disabled):not(.in-range):not(.range-start):not(.range-end):not(.selected-single) {
-    background: #f1f3f4;
+    background: var(--ytc-hover);
   }
   #ytc-panel .ytc-cal-cell.spillover {
-    color: #ccc;
+    color: var(--ytc-faint);
     cursor: default;
     pointer-events: none;
   }
   #ytc-panel .ytc-cal-cell.in-range {
-    background: #e8f0fe;
-    color: #1a73e8;
+    background: var(--ytc-blue-soft);
+    color: var(--ytc-blue);
     border-radius: 0;
   }
   #ytc-panel .ytc-cal-cell.range-start {
@@ -301,13 +334,13 @@
     opacity: 0.4;
   }
   #ytc-panel .ytc-cal-cell.future {
-    color: #ccc;
+    color: var(--ytc-faint);
     cursor: default;
     pointer-events: none;
   }
   #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range) {
     font-weight: 700;
-    color: #1a73e8;
+    color: var(--ytc-blue);
   }
   #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range)::after {
     content: '';
@@ -318,11 +351,11 @@
     width: 3px;
     height: 3px;
     border-radius: 50%;
-    background: #1a73e8;
+    background: var(--ytc-blue);
   }
   #ytc-panel .ytc-cal-hint {
     font-size: 11px;
-    color: #80868b;
+    color: var(--ytc-subtle);
     text-align: center;
     margin-top: 6px;
   }
@@ -338,7 +371,7 @@
   #ytc-panel .ytc-cal-clear {
     border: none;
     background: none;
-    color: #80868b;
+    color: var(--ytc-subtle);
     font-size: 11px;
     font-family: 'DM Sans', 'Roboto', sans-serif;
     cursor: pointer;
@@ -348,7 +381,7 @@
     transition: color 0.15s ease;
   }
   #ytc-panel .ytc-cal-clear:hover {
-    color: #d93025;
+    color: var(--ytc-red);
   }
   @keyframes ytc-fadein {
     from { opacity: 0; transform: translateY(-3px); }
@@ -360,7 +393,7 @@
   #ytc-panel .ytc-progress-wrap {
     margin-top: 6px;
     height: 3px;
-    background: rgba(0,0,0,0.12);
+    background: var(--ytc-track);
     border-radius: 99px;
     overflow: hidden;
   }
@@ -370,113 +403,6 @@
     background: currentColor;
     transition: width 0.35s ease;
     min-width: 4px;
-  }
-  html[dark] #ytc-panel {
-    background: #212121;
-    border-color: #3d3d3d;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.4);
-  }
-  html[dark] #ytc-panel .ytc-title {
-    color: #f1f1f1;
-  }
-  html[dark] #ytc-panel .ytc-seg {
-    border-color: #3d3d3d;
-  }
-  html[dark] #ytc-panel .ytc-seg-btn {
-    background: #2d2d2d;
-    color: #aaa;
-    border-right-color: #3d3d3d;
-  }
-  html[dark] #ytc-panel .ytc-seg-btn.active {
-    background: #1557b0;
-    color: #fff;
-  }
-  html[dark] #ytc-panel .ytc-label {
-    color: #aaa;
-  }
-  html[dark] #ytc-panel .ytc-hint {
-    color: #666;
-  }
-  html[dark] #ytc-panel select {
-    background: #2d2d2d;
-    border-color: #3d3d3d;
-    color: #f1f1f1;
-  }
-  html[dark] #ytc-panel .ytc-btn:disabled {
-    background: #444 !important;
-    color: #fff;
-  }
-  html[dark] #ytc-panel .ytc-btn-cancel {
-    color: #aaa;
-    border-color: #3d3d3d;
-  }
-  html[dark] #ytc-panel .ytc-info-blue {
-    background: #1a3a6e;
-    color: #8ab4f8;
-  }
-  html[dark] #ytc-panel .ytc-info-red {
-    background: #4a1a17;
-    color: #f28b82;
-  }
-  html[dark] #ytc-panel .ytc-info-green {
-    background: #1a3d26;
-    color: #81c995;
-  }
-  html[dark] #ytc-panel .ytc-progress-wrap {
-    background: rgba(255,255,255,0.12);
-  }
-  html[dark] #ytc-panel .ytc-calendar {
-    background: #1a1a1a;
-    border-color: #3d3d3d;
-  }
-  html[dark] #ytc-panel .ytc-cal-nav {
-    color: #aaa;
-  }
-  html[dark] #ytc-panel .ytc-cal-nav:hover:not(:disabled) {
-    color: #8ab4f8;
-  }
-  html[dark] #ytc-panel .ytc-cal-month {
-    color: #f1f1f1;
-  }
-  html[dark] #ytc-panel .ytc-cal-dh {
-    color: #666;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell {
-    color: #e8e8e8;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell:hover:not(.spillover):not(.future):not(.cell-disabled):not(.in-range):not(.range-start):not(.range-end):not(.selected-single) {
-    background: #333;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.spillover {
-    color: #555;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.future {
-    color: #555;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.in-range {
-    background: #1a3a6e;
-    color: #8ab4f8;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range) {
-    color: #8ab4f8;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.today:not(.range-start):not(.range-end):not(.selected-single):not(.in-range)::after {
-    background: #8ab4f8;
-  }
-  html[dark] #ytc-panel .ytc-cal-hint {
-    color: #666;
-  }
-  html[dark] #ytc-panel .ytc-cal-clear {
-    color: #666;
-  }
-  html[dark] #ytc-panel .ytc-cal-clear:hover {
-    color: #f28b82;
-  }
-  html[dark] #ytc-panel .ytc-cal-cell.range-start,
-  html[dark] #ytc-panel .ytc-cal-cell.range-end,
-  html[dark] #ytc-panel .ytc-cal-cell.selected-single {
-    background: #1a73e8;
-    color: #fff;
   }
 
   /* Manual per-row delete button. Lives inside YouTube's own thumbnail
@@ -614,32 +540,10 @@
     { label: 'All time', days: null },
   ];
 
-  // Web Worker-based sleep so timers keep running in background tabs.
-  // Falls back to setTimeout if the worker can't be created (e.g., CSP).
-  let _timerWorker = null;
-  let _workerFailed = false;
-  let _timerSeq    = 0;
-
-  function getTimerWorker() {
-    if (_workerFailed) return null;
-    if (_timerWorker)  return _timerWorker;
-    try {
-      const src = 'self.onmessage=function(e){setTimeout(function(){self.postMessage(e.data[0]);},e.data[1]);};';
-      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-      const w = new Worker(url);
-      w.addEventListener('error', () => { _workerFailed = true; _timerWorker = null; });
-      _timerWorker = w;
-      return w;
-    } catch (err) {
-      _workerFailed = true;
-      return null;
-    }
-  }
-
   // Hidden tabs clamp setTimeout to ~1s, so a 150ms-per-item deletion stretches
-  // to seconds per item and starts skipping rows outright. The Worker above can
-  // never help on YouTube — Trusted Types rejects the blob URL, and CSP blocks
-  // blob: workers even past that — but the audio clock runs on its own thread
+  // to seconds per item and starts skipping rows outright. A blob Worker timer
+  // can never help on YouTube — Trusted Types rejects the blob URL, and CSP
+  // blocks blob: workers even past that — but the audio clock runs on its own thread
   // and is not throttled while the tab is hidden. Scheduling a silent source to
   // stop and waiting for its 'ended' event gives a timer that needs no URL at
   // all, so nothing in YouTube's CSP has anything to bite on.
@@ -704,8 +608,8 @@
       let done = false;
       const finish = () => { if (!done) { done = true; resolve(); } };
 
-      // Always-on backup: setTimeout guarantees the promise resolves
-      // even if the worker is dead, throttled, or silently blocked.
+      // Always-on backup: setTimeout guarantees the promise resolves even if
+      // the audio clock never started or was silently suspended.
       setTimeout(finish, ms);
 
       // Unthrottled in hidden tabs, where the setTimeout above is clamped to
@@ -713,23 +617,6 @@
       // and the timer above still carries the run.
       const audio = audioSleep(ms);
       if (audio) audio.then(finish);
-
-      const worker = getTimerWorker();
-      if (!worker) return;
-
-      const id = ++_timerSeq;
-      const handler = e => {
-        if (e.data === id) {
-          worker.removeEventListener('message', handler);
-          finish();
-        }
-      };
-      worker.addEventListener('message', handler);
-      try {
-        worker.postMessage([id, ms]);
-      } catch (err) {
-        worker.removeEventListener('message', handler);
-      }
     });
   }
 
@@ -1184,46 +1071,41 @@
     const rangeEl   = document.getElementById('ytc-range');
     const actionBtn = document.getElementById('ytc-action');
 
-    panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary), .ytc-hint').forEach(el => el.remove());
+    panel.querySelectorAll('.ytc-info:not(#ytc-cal-summary)').forEach(el => el.remove());
+
+    const busy = state === STATE.SCANNING || state === STATE.DELETING;
+    if (rangeEl) rangeEl.disabled = busy;
+    setSegButtonsDisabled(busy);
+    actionBtn.className = 'ytc-btn ytc-btn-blue';
+    actionBtn.disabled  = false;
 
     switch (state) {
 
       case STATE.IDLE:
-        if (rangeEl) { rangeEl.disabled = false; rangeEl.onchange = null; }
+        if (rangeEl) rangeEl.onchange = null;
         actionBtn.textContent = 'Scan';
-        actionBtn.className   = 'ytc-btn ytc-btn-blue';
         actionBtn.disabled    = calendarMode && !selectedStart;
         actionBtn.onclick     = handleScan;
-        setSegButtonsDisabled(false);
-        if (calendarMode) renderCalendar();
         break;
 
       case STATE.SCANNING:
-        if (rangeEl) rangeEl.disabled = true;
         actionBtn.textContent = 'Scanning...';
         actionBtn.className   = 'ytc-btn';
         actionBtn.disabled    = true;
         insertInfo(actionBtn, 'blue', 'Scanning...', `Found ${data.count ?? 0} items`);
-        setSegButtonsDisabled(true);
-        if (calendarMode) renderCalendar();
         break;
 
       case STATE.READY:
-        if (rangeEl) { rangeEl.disabled = false; rangeEl.onchange = () => setState(STATE.IDLE); }
+        if (rangeEl) rangeEl.onchange = () => setState(STATE.IDLE);
         actionBtn.textContent = `Delete ${data.count} items`;
         actionBtn.className   = 'ytc-btn ytc-btn-red';
-        actionBtn.disabled    = false;
         actionBtn.onclick     = handleDelete;
         insertInfo(actionBtn, 'blue', 'Ready to delete', `${data.count} items found`);
-        setSegButtonsDisabled(false);
-        if (calendarMode) renderCalendar();
         break;
 
       case STATE.DELETING: {
-        if (rangeEl) rangeEl.disabled = true;
         actionBtn.textContent = 'Cancel';
         actionBtn.className   = 'ytc-btn ytc-btn-cancel';
-        actionBtn.disabled    = false;
         actionBtn.onclick     = handleCancel;
         insertInfo(actionBtn, 'red', 'Deleting...', `0 / ${data.total} deleted`, 0);
         const infoBox = document.querySelector('#ytc-panel .ytc-info-red');
@@ -1233,42 +1115,27 @@
           eta.style.cssText = 'display:block;font-size:11px;opacity:0.75;margin-top:3px;';
           infoBox.appendChild(eta);
         }
-        setSegButtonsDisabled(true);
-        if (calendarMode) renderCalendar();
         break;
       }
 
-      case STATE.DONE: {
-        if (rangeEl) rangeEl.disabled = false;
+      case STATE.DONE:
         actionBtn.textContent = 'Scan Again';
-        actionBtn.className   = 'ytc-btn ytc-btn-blue';
-        actionBtn.disabled    = false;
-        actionBtn.onclick     = handleReset;
-        const doneLabel = data.skipped > 0
+        actionBtn.onclick     = initStateIdle;
+        insertInfo(actionBtn, 'green', data.skipped > 0
           ? `✓ Done! ${data.count} deleted, ${data.skipped} skipped`
-          : `✓ Done! Deleted ${data.count} items`;
-        insertInfo(actionBtn, 'green', doneLabel, null);
+          : `✓ Done! Deleted ${data.count} items`, null);
         insertRefreshButton(actionBtn);
-        setSegButtonsDisabled(false);
-        if (calendarMode) renderCalendar();
         break;
-      }
 
-      case STATE.CANCELLED: {
-        if (rangeEl) rangeEl.disabled = false;
+      case STATE.CANCELLED:
         actionBtn.textContent = 'Scan Again';
-        actionBtn.className   = 'ytc-btn ytc-btn-blue';
-        actionBtn.disabled    = false;
-        actionBtn.onclick     = handleReset;
-        const cancelLabel = data.deleted > 0
-          ? `Cancelled — ${data.deleted} deleted`
-          : 'Cancelled';
-        insertInfo(actionBtn, 'blue', cancelLabel, data.skipped > 0 ? `${data.skipped} skipped` : null);
-        setSegButtonsDisabled(false);
-        if (calendarMode) renderCalendar();
+        actionBtn.onclick     = initStateIdle;
+        insertInfo(actionBtn, 'blue', data.deleted > 0 ? `Cancelled — ${data.deleted} deleted` : 'Cancelled',
+                   data.skipped > 0 ? `${data.skipped} skipped` : null);
         break;
-      }
     }
+
+    if (calendarMode) renderCalendar();
   }
 
   function setSegButtonsDisabled(disabled) {
@@ -1301,14 +1168,6 @@
       div.appendChild(wrap);
     }
 
-    panel.insertBefore(div, beforeNode);
-  }
-
-  function insertHint(beforeNode, text) {
-    const panel = document.getElementById('ytc-panel');
-    const div   = document.createElement('div');
-    div.className   = 'ytc-hint';
-    div.textContent = text;
     panel.insertBefore(div, beforeNode);
   }
 
@@ -1357,20 +1216,8 @@
     deletedCount    = 0;
     skippedCount    = 0;
     cancelRequested = false;
-    calendarMode    = false;
-    selectedStart   = null;
-    selectedEnd     = null;
-    hoverDate       = null;
+    setCalendarMode('quick');
     setState(STATE.IDLE);
-    // Ensure segmented control reflects Quick mode
-    const quickBtn  = document.getElementById('ytc-seg-quick');
-    const customBtn = document.getElementById('ytc-seg-custom');
-    if (quickBtn)  quickBtn.classList.add('active');
-    if (customBtn) customBtn.classList.remove('active');
-    const quickSection  = document.getElementById('ytc-quick-section');
-    const customSection = document.getElementById('ytc-custom-section');
-    if (quickSection)  quickSection.style.display  = '';
-    if (customSection) customSection.style.display = 'none';
   }
 
   const SCROLL_PAUSE_MS     = 800;  // ceiling for a scroll batch, not a fixed wait
@@ -1437,10 +1284,8 @@
     // Match on the month-name prefix so both "Jun" and "June" resolve.
     const monthDay = text.match(/^([A-Za-z]+)\s+(\d+)(?:,?\s+(\d{4}))?$/);
     if (monthDay) {
-      const months = ['january','february','march','april','may','june',
-                      'july','august','september','october','november','december'];
       const key  = monthDay[1].toLowerCase();
-      const mIdx = months.findIndex(m => m.startsWith(key));
+      const mIdx = CAL_MONTHS.findIndex(m => m.toLowerCase().startsWith(key));
       if (mIdx !== -1) {
         const year = monthDay[3] ? parseInt(monthDay[3], 10) : today.getFullYear();
         const d = new Date(year, mIdx, parseInt(monthDay[2], 10));
@@ -1459,10 +1304,6 @@
     return date <= cutoff;
   }
 
-  function getCustomRange() {
-    return { start: selectedStart, end: selectedEnd };
-  }
-
   function isSectionInCustomRange(headerText, range) {
     const date = parseSectionDate(headerText);
     if (!date) return false;
@@ -1479,7 +1320,7 @@
 
     let filterFn;
     if (calendarMode) {
-      const range = getCustomRange();
+      const range = { start: selectedStart, end: selectedEnd };
       filterFn = (headerText) => isSectionInCustomRange(headerText, range);
     } else {
       const cutoff = getCutoffDate();
@@ -1590,13 +1431,7 @@
 
     if (foundItems.size === 0) {
       setState(STATE.IDLE);
-      const panel     = document.getElementById('ytc-panel');
-      const actionBtn = document.getElementById('ytc-action');
-      const msg = document.createElement('div');
-      msg.className   = 'ytc-info ytc-info-blue';
-      msg.textContent = 'No items found in this range.';
-      panel.insertBefore(msg, actionBtn);
-      setTimeout(() => msg.remove(), 3000);
+      flashInfo('blue', 'No items found in this range.');
       return;
     }
     setState(STATE.READY, { count: foundItems.size });
@@ -2061,8 +1896,8 @@
   // from watch history" -> confirm if asked -> verify the row actually went
   // away. Shared by the batch loop below and the single-row ✕ button, so a fix
   // to this sequence only ever needs to happen once. Callers own everything
-  // this does NOT do: counters, pacing/backoff, and the trailing step delay —
-  // see the reason -> behavior table in the plan this was built from.
+  // this does NOT do: counters, pacing/backoff, and the trailing step delay.
+  // The failure reason tells deleteNext whether a step delay is owed.
   async function domRemoveItem(item) {
     if (!await scrollItemIntoView(item)) {
       // Couldn't get the row on-screen, so YouTube won't render its hover
@@ -2084,7 +1919,7 @@
     const removeBtn = await waitForMenuOption(MENU_ITEM_SEL, DIALOG_TIMEOUT);
 
     if (!removeBtn) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      dismissOpenMenu();
       return { ok: false, reason: 'option' };
     }
 
@@ -2212,8 +2047,8 @@
   // note in init() about the CPU cost that caused on this project).
   //
   // Everything below is written around one constraint: this must never be able
-  // to interfere with a scan or a batch delete in progress. Each guard has a
-  // number; see the plan's "Non-interference contract" for the full reasoning.
+  // to interfere with a scan or a batch delete in progress. Each guard is
+  // numbered and explained where it is enforced.
 
   const ROW_SEL = 'yt-lockup-view-model, ytd-video-renderer';
 
@@ -2368,18 +2203,16 @@
     _rowXBrowseEl = null;
   }
 
-  // Mirrors onScanComplete's "No items found" box: built by hand (not via
-  // insertInfo) so we keep a reference to remove it after a few seconds, and
-  // deliberately given no .ytc-info-strong child — updateDeletingProgress
-  // finds its number via "#ytc-panel .ytc-info-red .ytc-info-strong" and must
-  // never match this one-off message.
-  function showRowXFailure() {
+  // A message that clears itself after a few seconds. Deliberately given no
+  // .ytc-info-strong child — updateDeletingProgress finds its number via
+  // "#ytc-panel .ytc-info-red .ytc-info-strong" and must never match this.
+  function flashInfo(color, text) {
     const panel     = document.getElementById('ytc-panel');
     const actionBtn = document.getElementById('ytc-action');
     if (!panel || !actionBtn) return;
     const msg = document.createElement('div');
-    msg.className   = 'ytc-info ytc-info-red';
-    msg.textContent = "Couldn't remove that video. Try again, or use the ⋮ menu.";
+    msg.className   = `ytc-info ytc-info-${color}`;
+    msg.textContent = text;
     panel.insertBefore(msg, actionBtn);
     setTimeout(() => msg.remove(), 3000);
   }
@@ -2434,7 +2267,7 @@
         }
       }
     } else {
-      showRowXFailure();
+      flashInfo('red', "Couldn't remove that video. Try again, or use the ⋮ menu.");
     }
   }
 
@@ -2448,37 +2281,21 @@
     }
   }
 
-  function handleReset() {
-    selectedStart = null;
-    selectedEnd   = null;
-    hoverDate     = null;
-    const summaryEl = document.getElementById('ytc-cal-summary');
-    if (summaryEl) summaryEl.remove();
-    initStateIdle();
-  }
 
   function injectPanel() {
-    const isMobile = window.innerWidth < 1014;
-
     // Wait for the history page itself to mount — #secondary alone exists on
     // many YT pages, so without this guard we can inject into a stale sidebar
     // that YouTube then replaces during the SPA transition.
-    const historyPageSel = 'ytd-browse[page-subtype="history"]';
-
-    if (isMobile) {
-      waitForElement(historyPageSel, (browseEl) => {
+    waitForElement('ytd-browse[page-subtype="history"]', (browseEl) => {
+      if (window.innerWidth < 1014) {
         const el = document.querySelector('ytd-browse-filter-chip-bar-renderer, #secondary');
         if (el) appendPanel(el.parentElement || el, el.nextSibling);
-        installRowHoverListeners(browseEl);
-      });
-    } else {
-      waitForElement(historyPageSel, (browseEl) => {
-        const sidebar = document.querySelector('ytd-browse[page-subtype="history"] #secondary') ||
-                        document.querySelector('#secondary');
+      } else {
+        const sidebar = browseEl.querySelector('#secondary') || document.querySelector('#secondary');
         if (sidebar) appendPanel(sidebar, null);
-        installRowHoverListeners(browseEl);
-      });
-    }
+      }
+      installRowHoverListeners(browseEl);
+    });
   }
 
   function appendPanel(parent, beforeNode) {
