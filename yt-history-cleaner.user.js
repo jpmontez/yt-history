@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         YT History Cleaner
-// @namespace    https://github.com/jmontez
-// @version      1.23
+// @namespace    https://github.com/jpmontez
+// @version      1.24
 // @description  Bulk-delete YouTube watch history by time range
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
 // @grant        none
+// @license      MIT
+// @updateURL    https://raw.githubusercontent.com/jpmontez/yt-history/main/yt-history-cleaner.user.js
+// @downloadURL  https://raw.githubusercontent.com/jpmontez/yt-history/main/yt-history-cleaner.user.js
 // ==/UserScript==
 
 (function () {

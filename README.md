@@ -8,9 +8,20 @@ It uses your normal signed-in YouTube session — no API keys, no accounts, noth
 
 ## Installation
 
-**Safari:** install the [Userscripts](https://apps.apple.com/us/app/userscripts/id1463298887) app and enable its extension in Safari's settings, then add [`yt-history-cleaner.user.js`](yt-history-cleaner.user.js) as a new script and allow it on youtube.com.
+**Safari:** install the [Userscripts](https://apps.apple.com/us/app/userscripts/id1463298887) app, choose its scripts folder, and enable its extension in Safari's settings, allowing it on youtube.com. Then download the script into that folder:
 
-**Chrome, Firefox, Edge:** install [Tampermonkey](https://www.tampermonkey.net/), click its icon → **Create a new script**, replace the default contents with [`yt-history-cleaner.user.js`](yt-history-cleaner.user.js), and save.
+```sh
+curl -fsSL -o ~/Documents/Userscripts/yt-history-cleaner.user.js \
+  https://raw.githubusercontent.com/jpmontez/yt-history/main/yt-history-cleaner.user.js
+```
+
+(Use your own Userscripts folder if it isn't `~/Documents/Userscripts`.)
+
+**Chrome, Firefox, Edge:** install [Tampermonkey](https://www.tampermonkey.net/), then open [the raw script](https://raw.githubusercontent.com/jpmontez/yt-history/main/yt-history-cleaner.user.js). Tampermonkey shows its install page; click **Install**.
+
+**Updates** are automatic: both managers check the script's `@updateURL` and install a new release whenever its `@version` goes up. Tampermonkey checks daily by default; in Userscripts, use **Check for updates** in the toolbar popup.
+
+**Installed before v1.24?** That copy has no update URL and a different `@namespace`, so the managers treat the new install as a separate script. Delete the old copy first so the two don't both run.
 
 Then open [youtube.com/feed/history](https://www.youtube.com/feed/history) — the panel appears automatically.
 
@@ -82,7 +93,7 @@ All requests go to youtube.com with your existing session. The only other reques
 - **Tied to YouTube internals:** YouTube changes its page and internal API from time to time. If the script stops working, its selectors or response parsing may need updating. It falls back to page mode where it can.
 - **English only:** date headings and the "Remove from watch history" label are matched in English.
 - **No undo:** deletions are permanent, and there is no confirmation prompt — the count on the **Delete N items** button is the only warning.
-- **Personal use:** this isn't packaged as a browser extension and doesn't update itself; to update, replace the script's contents with the latest version.
+- **Personal use:** this isn't packaged as a browser extension; updates come through your userscript manager (see [Installation](#installation)).
 
 ---
 
